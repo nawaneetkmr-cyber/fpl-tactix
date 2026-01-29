@@ -23,3 +23,9 @@ export async function fetchEntry(teamId: number) {
   if (!res.ok) throw new Error(`entry ${teamId} failed: ${res.status}`);
   return res.json();
 }
+
+export async function fetchEntryHistory(teamId: number) {
+  const res = await fetch(`${BASE}/entry/${teamId}/history/`, { next: { revalidate: 600 } });
+  if (!res.ok) throw new Error(`entry history ${teamId} failed: ${res.status}`);
+  return res.json();
+}
