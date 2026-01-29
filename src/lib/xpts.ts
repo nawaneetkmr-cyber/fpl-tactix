@@ -3,8 +3,6 @@
 // attacking stats, opponent defensive quality, fixture context,
 // minutes probability, and position.
 
-import { BootstrapElement } from "./calculations";
-
 // ---------- Types ----------
 
 export interface PlayerProjection {
@@ -79,7 +77,6 @@ export interface FullElement {
 
 // Base expected points by position per 90 minutes
 const BASE_APPEARANCE_PTS = 2; // 60+ mins
-const PARTIAL_APPEARANCE_PTS = 1; // 1-59 mins
 
 // Points for actions by position
 const GOAL_POINTS: Record<number, number> = { 1: 6, 2: 6, 3: 5, 4: 4 };
@@ -328,7 +325,6 @@ function calculateBonusProjection(
   csProb: number
 ): number {
   // Bonus is correlated with involvement
-  const ict = parseFloat(el.ict_index || "0");
   const gamesPlayed = Math.max(el.starts, 1);
   const bonusPerGame = el.bonus / gamesPlayed;
 

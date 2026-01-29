@@ -424,7 +424,7 @@ function analyzeFreeHit(
 function analyzeWildcard(
   squad: { element: number; position: number }[],
   projMap: Map<number, PlayerProjection>,
-  allElements: FullElement[]
+  _allElements: FullElement[]
 ): WildcardAnalysis {
   // Assess squad strength
   const starters = squad.filter((p) => p.position <= 11);

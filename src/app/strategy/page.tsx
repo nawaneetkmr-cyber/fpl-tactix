@@ -131,27 +131,27 @@ function StrategyInner() {
   const [fixtureData, setFixtureData] = useState<FixtureData | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function fetchStrategyData(id: string) {
-    if (!id) return;
+  useEffect(() => {
+    if (!teamId) return;
+    let cancelled = false;
     setLoading(true);
 
-    // Fetch all strategy data in parallel
-    const [transfersRes, chipsRes, riskRes, fixturesRes] = await Promise.all([
-      fetch(`/api/fpl/strategy/transfers?teamId=${id}`).then((r) => r.json()).catch((e) => ({ error: String(e) })),
-      fetch(`/api/fpl/strategy/chips?teamId=${id}`).then((r) => r.json()).catch((e) => ({ error: String(e) })),
-      fetch(`/api/fpl/strategy/risk?teamId=${id}`).then((r) => r.json()).catch((e) => ({ error: String(e) })),
+    Promise.all([
+      fetch(`/api/fpl/strategy/transfers?teamId=${teamId}`).then((r) => r.json()).catch((e) => ({ error: String(e) })),
+      fetch(`/api/fpl/strategy/chips?teamId=${teamId}`).then((r) => r.json()).catch((e) => ({ error: String(e) })),
+      fetch(`/api/fpl/strategy/risk?teamId=${teamId}`).then((r) => r.json()).catch((e) => ({ error: String(e) })),
       fetch(`/api/fpl/strategy/fixtures`).then((r) => r.json()).catch((e) => ({ error: String(e) })),
-    ]);
+    ]).then(([transfersRes, chipsRes, riskRes, fixturesRes]) => {
+      if (cancelled) return;
+      setTransferData(transfersRes);
+      setChipData(chipsRes);
+      setRiskData(riskRes);
+      setFixtureData(fixturesRes);
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
 
-    setTransferData(transfersRes);
-    setChipData(chipsRes);
-    setRiskData(riskRes);
-    setFixtureData(fixturesRes);
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    if (teamId) fetchStrategyData(teamId);
+    return () => { cancelled = true; };
   }, [teamId]);
 
   function handleSubmit(e: React.FormEvent) {

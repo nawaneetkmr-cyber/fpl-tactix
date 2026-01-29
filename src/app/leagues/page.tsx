@@ -98,28 +98,33 @@ function LeaguesInner() {
     "standings"
   );
 
-  async function fetchLeagueData(tid: string, lid: string) {
-    if (!tid || !lid) return;
-    setLoading(true);
-    try {
-      const res = await fetch(
-        `/api/fpl/league/live?leagueId=${lid}&teamId=${tid}`
-      );
-      const json = await res.json();
-      if (json.error) {
-        setData({ error: json.error } as LeagueData);
-      } else {
-        setData(json);
-      }
-    } catch (e) {
-      setData({ error: String(e) } as LeagueData);
-    }
-    setLoading(false);
-  }
-
   useEffect(() => {
-    if (teamId && leagueId) fetchLeagueData(teamId, leagueId);
+    if (!teamId || !leagueId) return;
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/fpl/league/live?leagueId=${leagueId}&teamId=${teamId}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json.error) {
+          setData({ error: json.error } as LeagueData);
+        } else {
+          setData(json);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setData({ error: String(e) } as LeagueData);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [teamId, leagueId]);
+
+  function fetchLeagueData(tid: string, lid: string) {
+    setTeamId(tid);
+    setLeagueId(lid);
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

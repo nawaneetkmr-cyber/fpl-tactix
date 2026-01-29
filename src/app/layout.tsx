@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FPL Tactix - Live FPL Rank, AI Optimization & What-If Simulator",
+  title: "FPL Tactix - Decision Intelligence & Strategy Engine for FPL",
   description:
-    "Real-time companion tool for Fantasy Premier League managers. Live rank tracking, AI-optimized squad analysis, and what-if simulations.",
+    "Real-time decision intelligence and strategy engine for Fantasy Premier League. Live rank, AI optimization, xPts projections, league intelligence, and strategic planning.",
 };
 
 export default function RootLayout({
@@ -59,6 +59,28 @@ export default function RootLayout({
               }}
             >
               Dashboard
+            </a>
+            <a
+              href="/leagues"
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: "var(--muted)",
+                textDecoration: "none",
+              }}
+            >
+              Leagues
+            </a>
+            <a
+              href="/strategy"
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: "var(--muted)",
+                textDecoration: "none",
+              }}
+            >
+              Strategy
             </a>
           </div>
         </nav>
