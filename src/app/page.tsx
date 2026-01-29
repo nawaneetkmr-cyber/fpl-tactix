@@ -59,8 +59,9 @@ export default function Home() {
             marginBottom: 40,
           }}
         >
-          Live rank tracking, AI-optimized squad analysis, and what-if
-          simulations. Know exactly how your FPL team is performing in real time.
+          Live rank tracking, AI-optimized squad analysis, expected points
+          projections, league intelligence, and strategic planning. The
+          Bloomberg Terminal for FPL managers.
         </p>
 
         <form
@@ -144,6 +145,43 @@ export default function Home() {
             </div>
             <div style={{ fontSize: 13, color: "var(--muted)" }}>
               Simulate captain changes, bench swaps, and more
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 16,
+            marginTop: 16,
+          }}
+        >
+          <div className="card" style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>&#128202;</div>
+            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>
+              xPts Engine
+            </div>
+            <div style={{ fontSize: 13, color: "var(--muted)" }}>
+              Expected points projections for every player
+            </div>
+          </div>
+          <div className="card" style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>&#127942;</div>
+            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>
+              League Intel
+            </div>
+            <div style={{ fontSize: 13, color: "var(--muted)" }}>
+              Threat radar and rival analysis in mini-leagues
+            </div>
+          </div>
+          <div className="card" style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>&#9981;&#65039;</div>
+            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>
+              Strategy
+            </div>
+            <div style={{ fontSize: 13, color: "var(--muted)" }}>
+              Transfer planner, chip timing, and risk analysis
             </div>
           </div>
         </div>
