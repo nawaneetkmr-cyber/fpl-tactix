@@ -2,6 +2,9 @@
 // Calculates expected points for players based on weighted form,
 // fixture difficulty, and minutes probability.
 
+import type { FixtureDetail, FullElement, TeamStrength } from "./xpts";
+import { calculatePlayerProjections } from "./xpts";
+
 // ---------- Types ----------
 
 export interface GWPlayerStats {
@@ -381,9 +384,9 @@ export function calculateTransferImpact(
 
 export function suggestNextGWCaptain(
   squadElementIds: number[],
-  allPlayers: PlayerMeta[],
-  allFixtures: FPLFixture[],
-  teams: FPLTeam[],
+  allPlayers: FullElement[],
+  allFixtures: FixtureDetail[],
+  teams: TeamStrength[],
   currentGW: number
 ): {
   suggestions: { element: number; webName: string; xPts: number; fixtureLabel: string }[];
@@ -391,44 +394,52 @@ export function suggestNextGWCaptain(
 } {
   // Find the actual next unfinished GW dynamically
   const unfinishedFixtures = allFixtures.filter((f) => !f.finished);
-  const nextGW = unfinishedFixtures.length > 0
-    ? Math.min(...unfinishedFixtures.map((f) => f.event))
-    : currentGW;
+  const nextGW =
+    unfinishedFixtures.length > 0
+      ? Math.min(...unfinishedFixtures.map((f) => f.event))
+      : currentGW;
 
-  const squadPlayers = allPlayers.filter((p) =>
-    squadElementIds.includes(p.id)
+  const teamMap = new Map(teams.map((t) => [t.id, t]));
+  const fixtureLabelsByTeam = new Map<number, string[]>();
+
+  for (const fix of allFixtures.filter((f) => f.event === nextGW)) {
+    const homeOpponent = teamMap.get(fix.team_a)?.short_name ?? "???";
+    const awayOpponent = teamMap.get(fix.team_h)?.short_name ?? "???";
+
+    const homeLabels = fixtureLabelsByTeam.get(fix.team_h) ?? [];
+    homeLabels.push(`${homeOpponent} (H)`);
+    fixtureLabelsByTeam.set(fix.team_h, homeLabels);
+
+    const awayLabels = fixtureLabelsByTeam.get(fix.team_a) ?? [];
+    awayLabels.push(`${awayOpponent} (A)`);
+    fixtureLabelsByTeam.set(fix.team_a, awayLabels);
+  }
+
+  const projections = calculatePlayerProjections(
+    allPlayers,
+    teams,
+    allFixtures,
+    nextGW
   );
 
-  const projections = squadPlayers.map((p) => {
-    const proj = projectPlayer(
-      p.id,
-      p.web_name,
-      p.team,
-      p.element_summary ?? [],
-      allFixtures,
-      teams,
-      nextGW,
-      1 // Only next GW
-    );
+  const squadProjections = projections.filter((p) =>
+    squadElementIds.includes(p.player_id)
+  );
+  const eligible = squadProjections.filter((p) => p.minutes_probability >= 0.4);
+  const baseList = eligible.length >= 3 ? eligible : squadProjections;
 
-    // Sum xPts for the same GW (handles DGW)
-    const nextGwProjs = proj.projections.filter((pr) => pr.gameweek === nextGW);
-    const totalXPts = nextGwProjs.reduce((sum, pr) => sum + pr.xPts, 0);
-    const fixtureLabels = nextGwProjs.map((pr) => pr.fixtureLabel).join(", ");
-
-    return {
-      element: p.id,
+  const suggestions = baseList
+    .map((p) => ({
+      element: p.player_id,
       webName: p.web_name,
-      xPts: Math.round(totalXPts * 100) / 100,
-      fixtureLabel: fixtureLabels || "No fixture",
-    };
-  });
+      xPts: Math.round(p.expected_points * 10) / 10,
+      fixtureLabel:
+        fixtureLabelsByTeam.get(p.team_id)?.join(", ") ?? "No fixture",
+    }))
+    .sort((a, b) => b.xPts - a.xPts)
+    .slice(0, 3);
 
-  // Sort by xPts descending and return top 3
-  return {
-    suggestions: projections.sort((a, b) => b.xPts - a.xPts).slice(0, 3),
-    nextGW,
-  };
+  return { suggestions, nextGW };
 }
 
 export function difficultyBgClass(difficulty: number): string {

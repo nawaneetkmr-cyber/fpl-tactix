@@ -34,18 +34,18 @@ export async function GET() {
     const events = bootstrap.events || [];
     let currentGW = 1;
     const currentEvent = events.find((e: { is_current: boolean }) => e.is_current);
-    if (currentEvent) {
+    const nextEvent = events.find((e: { is_next: boolean }) => e.is_next);
+    if (currentEvent && !currentEvent.finished) {
+      currentGW = currentEvent.id;
+    } else if (nextEvent) {
+      currentGW = nextEvent.id;
+    } else if (currentEvent) {
       currentGW = currentEvent.id;
     } else {
-      // Fallback: find next event and use previous, or highest finished
-      const nextEvent = events.find((e: { is_next: boolean }) => e.is_next);
-      if (nextEvent && nextEvent.id > 1) {
-        currentGW = nextEvent.id - 1;
-      } else {
-        const finishedEvents = events.filter((e: { finished: boolean }) => e.finished);
-        if (finishedEvents.length > 0) {
-          currentGW = Math.max(...finishedEvents.map((e: { id: number }) => e.id));
-        }
+      // Fallback: use next event if there's no current, otherwise highest finished.
+      const finishedEvents = events.filter((e: { finished: boolean }) => e.finished);
+      if (finishedEvents.length > 0) {
+        currentGW = Math.max(...finishedEvents.map((e: { id: number }) => e.id));
       }
     }
 
