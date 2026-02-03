@@ -1270,6 +1270,7 @@ function FixturesTab({ data }: { data: DashboardData }) {
   const [captainSuggestions, setCaptainSuggestions] = useState<
     { element: number; webName: string; xPts: number; fixtureLabel: string }[]
   >([]);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1281,6 +1282,12 @@ function FixturesTab({ data }: { data: DashboardData }) {
 
         if (cancelled) return;
 
+        if (!bootstrap.ok) {
+          setDebugInfo(`Bootstrap API error: ${bootstrap.error || bootstrap.status}`);
+          setFixturesLoading(false);
+          return;
+        }
+
         const fixtures: FPLFixture[] = bootstrap.fixtures || [];
         const teams: FPLTeam[] = (bootstrap.teams || []).map(
           (t: { id: number; name: string; short_name: string }) => ({
@@ -1289,7 +1296,13 @@ function FixturesTab({ data }: { data: DashboardData }) {
             short_name: t.short_name,
           })
         );
-        const currentGW = data.gameweek;
+        // Use bootstrap currentGW if available, otherwise fall back to data.gameweek
+        const currentGW = bootstrap.currentGW || data.gameweek;
+
+        // Debug info
+        if (fixtures.length === 0 || teams.length === 0) {
+          setDebugInfo(`No data: ${fixtures.length} fixtures, ${teams.length} teams, currentGW=${currentGW}`);
+        }
 
         // Build fixture difficulty grid
         const rows = buildFixtureDifficultyGrid(fixtures, teams, currentGW, 10);
@@ -1324,8 +1337,8 @@ function FixturesTab({ data }: { data: DashboardData }) {
           currentGW
         );
         setCaptainSuggestions(suggestions);
-      } catch {
-        // Silent fail, show empty grid
+      } catch (err) {
+        setDebugInfo(`Fetch error: ${String(err)}`);
       }
       if (!cancelled) setFixturesLoading(false);
     }
@@ -1344,6 +1357,27 @@ function FixturesTab({ data }: { data: DashboardData }) {
       <div className="fade-in" style={{ textAlign: "center", padding: 40 }}>
         <div className="spinner" style={{ margin: "0 auto 16px" }} />
         <p style={{ color: "var(--muted)" }}>Loading fixture data...</p>
+      </div>
+    );
+  }
+
+  // Show debug info if data loading failed or rows are empty
+  if (debugInfo || fixtureRows.length === 0) {
+    return (
+      <div className="fade-in">
+        <div className="card" style={{ textAlign: "center", padding: 40 }}>
+          <p style={{ color: "var(--warning)", marginBottom: 8 }}>
+            Unable to load fixture data
+          </p>
+          {debugInfo && (
+            <p style={{ color: "var(--muted)", fontSize: 12 }}>{debugInfo}</p>
+          )}
+          {!debugInfo && fixtureRows.length === 0 && (
+            <p style={{ color: "var(--muted)", fontSize: 12 }}>
+              No fixture rows generated. This may indicate a data issue with the FPL API.
+            </p>
+          )}
+        </div>
       </div>
     );
   }
