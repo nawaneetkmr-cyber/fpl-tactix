@@ -2,6 +2,15 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import FixtureDifficultyGrid from "@/components/FixtureDifficultyGrid";
+import {
+  buildFixtureDifficultyGrid,
+  suggestNextGWCaptain,
+  FPLFixture,
+  FPLTeam,
+  PlayerMeta,
+  FixtureDifficultyRow,
+} from "@/lib/projections";
 
 // ---------- Types ----------
 
@@ -96,7 +105,7 @@ function DashboardInner() {
   const [inputId, setInputId] = useState(teamIdParam || "");
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<"live" | "ai" | "whatif" | "team">("live");
+  const [tab, setTab] = useState<"live" | "ai" | "whatif" | "team" | "fixtures">("live");
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   const fetchData = useCallback(async (id: string) => {
@@ -281,6 +290,7 @@ function DashboardInner() {
             ["ai", "AI Optimized"],
             ["whatif", "What-If"],
             ["team", "Team View"],
+            ["fixtures", "Fixtures"],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -298,6 +308,7 @@ function DashboardInner() {
       {tab === "ai" && <AIOptimizedTab data={data} />}
       {tab === "whatif" && <WhatIfTab data={data} teamId={teamId} />}
       {tab === "team" && <TeamVisualizerTab data={data} />}
+      {tab === "fixtures" && <FixturesTab data={data} />}
     </div>
   );
 }
@@ -1247,6 +1258,198 @@ function PitchRow({
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------- Feature 5: Fixtures Tab ----------
+
+function FixturesTab({ data }: { data: DashboardData }) {
+  const [fixtureRows, setFixtureRows] = useState<FixtureDifficultyRow[]>([]);
+  const [fixturesLoading, setFixturesLoading] = useState(true);
+  const [captainSuggestions, setCaptainSuggestions] = useState<
+    { element: number; webName: string; xPts: number; fixtureLabel: string }[]
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchFixtureData() {
+      try {
+        const res = await fetch("/api/fpl/bootstrap");
+        const bootstrap = await res.json();
+
+        if (cancelled) return;
+
+        const fixtures: FPLFixture[] = bootstrap.fixtures || [];
+        const teams: FPLTeam[] = (bootstrap.teams || []).map(
+          (t: { id: number; name: string; short_name: string }) => ({
+            id: t.id,
+            name: t.name,
+            short_name: t.short_name,
+          })
+        );
+        const currentGW = data.gameweek;
+
+        // Build fixture difficulty grid
+        const rows = buildFixtureDifficultyGrid(fixtures, teams, currentGW, 10);
+        setFixtureRows(rows);
+
+        // Build captain suggestions
+        const squadIds = data.picks.map((p) => p.element);
+        const allPlayers: PlayerMeta[] = (bootstrap.elements || []).map(
+          (e: {
+            id: number;
+            web_name: string;
+            team: number;
+            element_type: number;
+            now_cost: number;
+            status: string;
+          }) => ({
+            id: e.id,
+            web_name: e.web_name,
+            team: e.team,
+            element_type: e.element_type,
+            now_cost: e.now_cost,
+            status: e.status,
+            element_summary: [],
+          })
+        );
+
+        const suggestions = suggestNextGWCaptain(
+          squadIds,
+          allPlayers,
+          fixtures,
+          teams,
+          currentGW
+        );
+        setCaptainSuggestions(suggestions);
+      } catch {
+        // Silent fail, show empty grid
+      }
+      if (!cancelled) setFixturesLoading(false);
+    }
+
+    fetchFixtureData();
+    return () => {
+      cancelled = true;
+    };
+  }, [data.gameweek, data.picks]);
+
+  // Get squad team IDs for highlighting
+  const squadTeamIds = [...new Set(data.picks.map((p) => p.teamId))];
+
+  if (fixturesLoading) {
+    return (
+      <div className="fade-in" style={{ textAlign: "center", padding: 40 }}>
+        <div className="spinner" style={{ margin: "0 auto 16px" }} />
+        <p style={{ color: "var(--muted)" }}>Loading fixture data...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fade-in">
+      {/* Captain Suggestion Card */}
+      {captainSuggestions.length > 0 && (
+        <div className="card-glow" style={{ marginBottom: 20 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--muted)",
+              marginBottom: 12,
+            }}
+          >
+            CAPTAIN SUGGESTIONS (GW{data.gameweek})
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {captainSuggestions.map((s, idx) => (
+              <div
+                key={s.element}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  background:
+                    idx === 0
+                      ? "linear-gradient(135deg, rgba(0,255,135,0.12), rgba(0,255,135,0.04))"
+                      : "var(--background)",
+                  border: idx === 0 ? "1px solid var(--accent)" : "none",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      background:
+                        idx === 0
+                          ? "var(--accent)"
+                          : idx === 1
+                            ? "#C0C0C0"
+                            : "#CD7F32",
+                      color: idx === 0 ? "#000" : "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {idx + 1}
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>
+                      {s.webName}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      {s.fixtureLabel}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: 18,
+                      color: idx === 0 ? "var(--accent-dark)" : "inherit",
+                    }}
+                  >
+                    {s.xPts.toFixed(1)}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                    xPts
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Fixture Difficulty Grid */}
+      <div className="card">
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--muted)",
+            marginBottom: 12,
+          }}
+        >
+          FIXTURE DIFFICULTY (NEXT 10 GWs)
+        </div>
+        <FixtureDifficultyGrid
+          rows={fixtureRows}
+          currentGW={data.gameweek}
+          numGWs={10}
+          highlightTeamIds={squadTeamIds}
+        />
+      </div>
     </div>
   );
 }
