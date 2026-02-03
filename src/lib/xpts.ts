@@ -182,29 +182,29 @@ export function calculatePlayerProjections(
 
       // Expected points from goals
       const goalPoints =
-        goalThreat * (GOAL_POINTS[el.element_type] || 4);
+        goalThreat * (GOAL_POINTS[el.element_type] || 4) * minutesProb;
 
       // Expected points from assists
-      const assistPoints = assistThreat * ASSIST_POINTS;
+      const assistPoints = assistThreat * ASSIST_POINTS * minutesProb;
 
       // Expected points from clean sheets
       const csPoints =
-        csProb * (CS_POINTS[el.element_type] || 0);
+        csProb * (CS_POINTS[el.element_type] || 0) * minutesProb;
 
       // Appearance points (weighted by minutes probability)
       const appearancePoints = minutesProb * BASE_APPEARANCE_PTS;
 
       // Bonus projection
-      const bonusProj = calculateBonusProjection(
-        el,
-        goalThreat,
-        assistThreat,
-        csProb
-      );
+      const bonusProj =
+        calculateBonusProjection(
+          el,
+          goalThreat,
+          assistThreat,
+          csProb
+        ) * minutesProb;
 
       const fixtureXPts =
-        (goalPoints + assistPoints + csPoints + appearancePoints + bonusProj) *
-        minutesProb;
+        goalPoints + assistPoints + csPoints + appearancePoints + bonusProj;
 
       totalXPts += fixtureXPts;
       totalGoalThreat += goalThreat;
