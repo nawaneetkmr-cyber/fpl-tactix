@@ -422,13 +422,8 @@ export function suggestNextGWCaptain(
     nextGW
   );
 
-  const squadProjections = projections.filter((p) =>
-    squadElementIds.includes(p.player_id)
-  );
-  const eligible = squadProjections.filter((p) => p.minutes_probability >= 0.4);
-  const baseList = eligible.length >= 3 ? eligible : squadProjections;
-
-  const suggestions = baseList
+  const suggestions = projections
+    .filter((p) => squadElementIds.includes(p.player_id))
     .map((p) => ({
       element: p.player_id,
       webName: p.web_name,
