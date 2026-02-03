@@ -25,8 +25,13 @@ export async function GET(req: Request) {
       return Response.json({ error: "Missing teamId" }, { status: 400 });
     }
 
-    // Fetch bootstrap first if gw is not provided — determine current GW
+    // Fetch bootstrap + history first if gw is not provided — determine current GW
     const bootstrap = await fetchBootstrap();
+    const history = await fetchEntryHistory(teamId);
+    const latestHistoryEvent =
+      history?.current && history.current.length > 0
+        ? Math.max(...history.current.map((h: { event: number }) => h.event))
+        : null;
 
     if (!gw) {
       const currentEvent = bootstrap.events?.find(
@@ -38,17 +43,24 @@ export async function GET(req: Request) {
       if (currentEvent && !currentEvent.finished) {
         gw = currentEvent.id;
       } else if (nextEvent) {
-        gw = nextEvent.id;
+        if (latestHistoryEvent && nextEvent.id > latestHistoryEvent) {
+          gw = latestHistoryEvent;
+        } else {
+          gw = nextEvent.id;
+        }
       } else if (currentEvent) {
         gw = currentEvent.id;
       } else {
         const finishedEvents = (bootstrap.events || []).filter(
           (e: { finished: boolean }) => e.finished
         );
-        gw =
-          finishedEvents.length > 0
-            ? Math.max(...finishedEvents.map((e: { id: number }) => e.id))
-            : 1;
+        if (finishedEvents.length > 0) {
+          gw = Math.max(...finishedEvents.map((e: { id: number }) => e.id));
+        } else if (latestHistoryEvent) {
+          gw = latestHistoryEvent;
+        } else {
+          gw = 1;
+        }
       }
     }
 
@@ -58,11 +70,10 @@ export async function GET(req: Request) {
     const averageScore = currentEvent?.average_entry_score ?? 0;
     const totalPlayers = bootstrap.total_players ?? 10000000;
 
-    const [live, picksData, entry, history] = await Promise.all([
+    const [live, picksData, entry] = await Promise.all([
       fetchLiveGW(gw),
       fetchUserPicks(teamId, gw),
       fetchEntry(teamId),
-      fetchEntryHistory(teamId),
     ]);
 
     const picks = picksData.picks;

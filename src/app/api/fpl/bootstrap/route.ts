@@ -43,14 +43,9 @@ export async function GET() {
       currentGW = currentEvent.id;
     } else {
       // Fallback: use next event if there's no current, otherwise highest finished.
-      const nextEvent = events.find((e: { is_next: boolean }) => e.is_next);
-      if (nextEvent) {
-        currentGW = nextEvent.id;
-      } else {
-        const finishedEvents = events.filter((e: { finished: boolean }) => e.finished);
-        if (finishedEvents.length > 0) {
-          currentGW = Math.max(...finishedEvents.map((e: { id: number }) => e.id));
-        }
+      const finishedEvents = events.filter((e: { finished: boolean }) => e.finished);
+      if (finishedEvents.length > 0) {
+        currentGW = Math.max(...finishedEvents.map((e: { id: number }) => e.id));
       }
     }
 
