@@ -37,10 +37,10 @@ export async function GET() {
     if (currentEvent) {
       currentGW = currentEvent.id;
     } else {
-      // Fallback: find next event and use previous, or highest finished
+      // Fallback: use next event if there's no current, otherwise highest finished.
       const nextEvent = events.find((e: { is_next: boolean }) => e.is_next);
-      if (nextEvent && nextEvent.id > 1) {
-        currentGW = nextEvent.id - 1;
+      if (nextEvent) {
+        currentGW = nextEvent.id;
       } else {
         const finishedEvents = events.filter((e: { finished: boolean }) => e.finished);
         if (finishedEvents.length > 0) {
