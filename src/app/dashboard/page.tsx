@@ -1270,6 +1270,7 @@ function FixturesTab({ data }: { data: DashboardData }) {
   const [captainSuggestions, setCaptainSuggestions] = useState<
     { element: number; webName: string; xPts: number; fixtureLabel: string }[]
   >([]);
+  const [captainGW, setCaptainGW] = useState<number | null>(null);
   const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1329,7 +1330,7 @@ function FixturesTab({ data }: { data: DashboardData }) {
           })
         );
 
-        const suggestions = suggestNextGWCaptain(
+        const { suggestions, nextGW } = suggestNextGWCaptain(
           squadIds,
           allPlayers,
           fixtures,
@@ -1337,6 +1338,7 @@ function FixturesTab({ data }: { data: DashboardData }) {
           currentGW
         );
         setCaptainSuggestions(suggestions);
+        setCaptainGW(nextGW);
       } catch (err) {
         setDebugInfo(`Fetch error: ${String(err)}`);
       }
@@ -1395,7 +1397,7 @@ function FixturesTab({ data }: { data: DashboardData }) {
               marginBottom: 12,
             }}
           >
-            CAPTAIN SUGGESTIONS (GW{data.gameweek})
+            CAPTAIN SUGGESTIONS (GW{captainGW ?? data.gameweek})
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {captainSuggestions.map((s, idx) => (

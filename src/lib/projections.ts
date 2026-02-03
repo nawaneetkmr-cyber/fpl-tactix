@@ -385,7 +385,16 @@ export function suggestNextGWCaptain(
   allFixtures: FPLFixture[],
   teams: FPLTeam[],
   currentGW: number
-): { element: number; webName: string; xPts: number; fixtureLabel: string }[] {
+): {
+  suggestions: { element: number; webName: string; xPts: number; fixtureLabel: string }[];
+  nextGW: number;
+} {
+  // Find the actual next unfinished GW dynamically
+  const unfinishedFixtures = allFixtures.filter((f) => !f.finished);
+  const nextGW = unfinishedFixtures.length > 0
+    ? Math.min(...unfinishedFixtures.map((f) => f.event))
+    : currentGW;
+
   const squadPlayers = allPlayers.filter((p) =>
     squadElementIds.includes(p.id)
   );
@@ -398,12 +407,12 @@ export function suggestNextGWCaptain(
       p.element_summary ?? [],
       allFixtures,
       teams,
-      currentGW,
+      nextGW,
       1 // Only next GW
     );
 
     // Sum xPts for the same GW (handles DGW)
-    const nextGwProjs = proj.projections.filter((pr) => pr.gameweek === currentGW);
+    const nextGwProjs = proj.projections.filter((pr) => pr.gameweek === nextGW);
     const totalXPts = nextGwProjs.reduce((sum, pr) => sum + pr.xPts, 0);
     const fixtureLabels = nextGwProjs.map((pr) => pr.fixtureLabel).join(", ");
 
@@ -416,7 +425,10 @@ export function suggestNextGWCaptain(
   });
 
   // Sort by xPts descending and return top 3
-  return projections.sort((a, b) => b.xPts - a.xPts).slice(0, 3);
+  return {
+    suggestions: projections.sort((a, b) => b.xPts - a.xPts).slice(0, 3),
+    nextGW,
+  };
 }
 
 export function difficultyBgClass(difficulty: number): string {
