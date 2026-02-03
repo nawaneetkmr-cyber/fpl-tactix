@@ -32,7 +32,24 @@ export async function GET(req: Request) {
       const currentEvent = bootstrap.events?.find(
         (e: { is_current: boolean }) => e.is_current
       );
-      gw = currentEvent?.id ?? 1;
+      const nextEvent = bootstrap.events?.find(
+        (e: { is_next: boolean }) => e.is_next
+      );
+      if (currentEvent && !currentEvent.finished) {
+        gw = currentEvent.id;
+      } else if (nextEvent) {
+        gw = nextEvent.id;
+      } else if (currentEvent) {
+        gw = currentEvent.id;
+      } else {
+        const finishedEvents = (bootstrap.events || []).filter(
+          (e: { finished: boolean }) => e.finished
+        );
+        gw =
+          finishedEvents.length > 0
+            ? Math.max(...finishedEvents.map((e: { id: number }) => e.id))
+            : 1;
+      }
     }
 
     const currentEvent = bootstrap.events?.find(
