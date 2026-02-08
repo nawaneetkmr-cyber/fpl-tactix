@@ -182,29 +182,29 @@ export function calculatePlayerProjections(
 
       // Expected points from goals
       const goalPoints =
-        goalThreat * (GOAL_POINTS[el.element_type] || 4);
+        goalThreat * (GOAL_POINTS[el.element_type] || 4) * minutesProb;
 
       // Expected points from assists
-      const assistPoints = assistThreat * ASSIST_POINTS;
+      const assistPoints = assistThreat * ASSIST_POINTS * minutesProb;
 
       // Expected points from clean sheets
       const csPoints =
-        csProb * (CS_POINTS[el.element_type] || 0);
+        csProb * (CS_POINTS[el.element_type] || 0) * minutesProb;
 
       // Appearance points (weighted by minutes probability)
       const appearancePoints = minutesProb * BASE_APPEARANCE_PTS;
 
       // Bonus projection
-      const bonusProj = calculateBonusProjection(
-        el,
-        goalThreat,
-        assistThreat,
-        csProb
-      );
+      const bonusProj =
+        calculateBonusProjection(
+          el,
+          goalThreat,
+          assistThreat,
+          csProb
+        ) * minutesProb;
 
       const fixtureXPts =
-        (goalPoints + assistPoints + csPoints + appearancePoints + bonusProj) *
-        minutesProb;
+        goalPoints + assistPoints + csPoints + appearancePoints + bonusProj;
 
       totalXPts += fixtureXPts;
       totalGoalThreat += goalThreat;
@@ -300,22 +300,25 @@ function calculateCleanSheetProbability(
 }
 
 function calculateMinutesProbability(el: FullElement): number {
+  const gamesPlayed = Math.max(Math.ceil(el.minutes / 90), 1);
+  const minutesShare = Math.min(el.minutes / (gamesPlayed * 90), 1);
+  const startRate = Math.min(el.starts / gamesPlayed, 1);
+  const usageRate = Math.max(minutesShare, startRate);
+
   // Use chance_of_playing_next_round if available
   if (el.chance_of_playing_next_round !== null) {
-    return el.chance_of_playing_next_round / 100;
+    return Math.min((el.chance_of_playing_next_round / 100) * usageRate, 0.95);
   }
 
   // Use status
-  if (el.status === "a") return 0.95; // available
-  if (el.status === "d") return 0.5; // doubtful
+  if (el.status === "a") return Math.min(0.95 * usageRate, 0.95); // available
+  if (el.status === "d") return Math.min(0.5 * usageRate, 0.95); // doubtful
   if (el.status === "i" || el.status === "u" || el.status === "s")
     return 0.0; // injured/unavailable/suspended
   if (el.status === "n") return 0.0; // not available
 
   // Fallback: estimate from starts and minutes
-  const gamesPlayed = Math.max(el.starts, 1);
-  const startRate = el.starts / gamesPlayed;
-  return Math.min(startRate, 0.95);
+  return Math.min(usageRate, 0.95);
 }
 
 function calculateBonusProjection(

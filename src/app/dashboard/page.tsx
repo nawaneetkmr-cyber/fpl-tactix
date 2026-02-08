@@ -7,10 +7,9 @@ import {
   buildFixtureDifficultyGrid,
   suggestNextGWCaptain,
   FPLFixture,
-  FPLTeam,
-  PlayerMeta,
   FixtureDifficultyRow,
 } from "@/lib/projections";
+import type { FullElement, TeamStrength } from "@/lib/xpts";
 
 // ---------- Types ----------
 
@@ -181,11 +180,27 @@ function DashboardInner() {
         }
 
         const fixtures: FPLFixture[] = bootstrap.fixtures || [];
-        const teams: FPLTeam[] = (bootstrap.teams || []).map(
-          (t: { id: number; name: string; short_name: string }) => ({
+        const teams: TeamStrength[] = (bootstrap.teams || []).map(
+          (t: {
+            id: number;
+            name: string;
+            short_name: string;
+            strength_attack_home: number;
+            strength_attack_away: number;
+            strength_defence_home: number;
+            strength_defence_away: number;
+            strength_overall_home: number;
+            strength_overall_away: number;
+          }) => ({
             id: t.id,
             name: t.name,
             short_name: t.short_name,
+            strength_attack_home: t.strength_attack_home,
+            strength_attack_away: t.strength_attack_away,
+            strength_defence_home: t.strength_defence_home,
+            strength_defence_away: t.strength_defence_away,
+            strength_overall_home: t.strength_overall_home,
+            strength_overall_away: t.strength_overall_away,
           })
         );
         const currentGW = bootstrap.currentGW || gameweek;
@@ -196,22 +211,35 @@ function DashboardInner() {
 
         // Build captain suggestions
         const squadIds = picks.map((p) => p.element);
-        const allPlayers: PlayerMeta[] = (bootstrap.elements || []).map(
-          (e: {
-            id: number;
-            web_name: string;
-            team: number;
-            element_type: number;
-            now_cost: number;
-            status: string;
-          }) => ({
+        const allPlayers: FullElement[] = (bootstrap.elements || []).map(
+          (e: FullElement) => ({
             id: e.id,
             web_name: e.web_name,
             team: e.team,
             element_type: e.element_type,
-            now_cost: e.now_cost,
             status: e.status,
-            element_summary: [],
+            now_cost: e.now_cost,
+            form: e.form,
+            points_per_game: e.points_per_game,
+            selected_by_percent: e.selected_by_percent,
+            minutes: e.minutes,
+            goals_scored: e.goals_scored,
+            assists: e.assists,
+            clean_sheets: e.clean_sheets,
+            goals_conceded: e.goals_conceded,
+            bonus: e.bonus,
+            influence: e.influence,
+            creativity: e.creativity,
+            threat: e.threat,
+            ict_index: e.ict_index,
+            expected_goals: e.expected_goals,
+            expected_assists: e.expected_assists,
+            expected_goal_involvements: e.expected_goal_involvements,
+            expected_goals_conceded: e.expected_goals_conceded,
+            starts: e.starts,
+            chance_of_playing_next_round: e.chance_of_playing_next_round,
+            total_points: e.total_points,
+            event_points: e.event_points,
           })
         );
 
