@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import {
   FixtureDifficultyRow,
   difficultyBgClass,
@@ -25,9 +25,19 @@ export default function FixtureDifficultyGrid({
   const [sortMode, setSortMode] = useState<SortMode>("best");
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
 
+  // Stabilize highlightTeamIds by comparing serialized values
+  const prevIdsRef = useRef<string>("");
+  const stableHighlightIds = useMemo(() => {
+    const serialized = JSON.stringify(highlightTeamIds.slice().sort());
+    if (serialized !== prevIdsRef.current) {
+      prevIdsRef.current = serialized;
+    }
+    return highlightTeamIds;
+  }, [highlightTeamIds]);
+
   const highlightSet = useMemo(
-    () => new Set(highlightTeamIds),
-    [highlightTeamIds]
+    () => new Set(stableHighlightIds),
+    [stableHighlightIds]
   );
 
   // Calculate average difficulty for each team
@@ -46,7 +56,7 @@ export default function FixtureDifficultyGrid({
   const sortedRows = useMemo(() => {
     let filtered = rowsWithAvg;
 
-    if (filterMode === "squad" && highlightTeamIds.length > 0) {
+    if (filterMode === "squad" && stableHighlightIds.length > 0) {
       filtered = filtered.filter((r) => highlightSet.has(r.teamId));
     }
 
@@ -57,7 +67,7 @@ export default function FixtureDifficultyGrid({
         a.teamName.localeCompare(b.teamName)
       );
     }
-  }, [rowsWithAvg, sortMode, filterMode, highlightSet, highlightTeamIds.length]);
+  }, [rowsWithAvg, sortMode, filterMode, highlightSet, stableHighlightIds.length]);
 
   // Generate GW columns
   const gwColumns = useMemo(() => {
@@ -77,8 +87,8 @@ export default function FixtureDifficultyGrid({
             onClick={() => setSortMode("best")}
             className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
               sortMode === "best"
-                ? "bg-green-600 text-white"
-                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                ? "bg-emerald-600 text-white"
+                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
             }`}
           >
             Best Fixtures
@@ -87,22 +97,22 @@ export default function FixtureDifficultyGrid({
             onClick={() => setSortMode("alpha")}
             className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
               sortMode === "alpha"
-                ? "bg-green-600 text-white"
-                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                ? "bg-emerald-600 text-white"
+                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
             }`}
           >
             A-Z
           </button>
         </div>
 
-        {highlightTeamIds.length > 0 && (
+        {stableHighlightIds.length > 0 && (
           <div className="flex gap-1">
             <button
               onClick={() => setFilterMode("all")}
               className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
                 filterMode === "all"
                   ? "bg-blue-600 text-white"
-                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
               }`}
             >
               All Teams
@@ -112,7 +122,7 @@ export default function FixtureDifficultyGrid({
               className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
                 filterMode === "squad"
                   ? "bg-blue-600 text-white"
-                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
               }`}
             >
               My Squad Only
@@ -123,7 +133,7 @@ export default function FixtureDifficultyGrid({
 
       {/* Legend */}
       <div className="flex items-center gap-2 mb-4 text-sm">
-        <span className="text-gray-400">Difficulty:</span>
+        <span className="text-slate-400">Difficulty:</span>
         <span className={`px-2 py-0.5 rounded ${difficultyBgClass(1)}`}>
           1
         </span>
@@ -139,21 +149,21 @@ export default function FixtureDifficultyGrid({
         <span className={`px-2 py-0.5 rounded ${difficultyBgClass(5)}`}>
           5
         </span>
-        <span className="text-gray-500 ml-2">Easy → Hard</span>
+        <span className="text-slate-500 ml-2">Easy → Hard</span>
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-gray-700">
+      <div className="overflow-x-auto rounded-lg border border-slate-700">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-gray-800">
-              <th className="sticky left-0 z-10 bg-gray-800 px-3 py-2 text-left font-semibold text-gray-300 min-w-[120px]">
+            <tr className="bg-slate-800">
+              <th className="sticky left-0 z-10 bg-slate-800 px-3 py-2 text-left font-semibold text-slate-300 min-w-[120px]">
                 Team
               </th>
               {gwColumns.map((gw) => (
                 <th
                   key={gw}
-                  className="px-2 py-2 text-center font-semibold text-gray-300 min-w-[70px]"
+                  className="px-2 py-2 text-center font-semibold text-slate-300 min-w-[70px]"
                 >
                   GW{gw}
                 </th>
@@ -163,7 +173,7 @@ export default function FixtureDifficultyGrid({
           <tbody>
             {sortedRows.map((row, idx) => {
               const isHighlighted = highlightSet.has(row.teamId);
-              const bgClass = idx % 2 === 0 ? "bg-gray-900" : "bg-gray-800";
+              const bgClass = idx % 2 === 0 ? "bg-slate-900" : "bg-slate-800";
 
               return (
                 <tr
@@ -174,7 +184,7 @@ export default function FixtureDifficultyGrid({
                 >
                   <td
                     className={`sticky left-0 z-10 px-3 py-2 font-medium ${bgClass} ${
-                      isHighlighted ? "text-blue-400" : "text-gray-200"
+                      isHighlighted ? "text-blue-400" : "text-slate-200"
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -197,7 +207,7 @@ export default function FixtureDifficultyGrid({
                         className="px-2 py-1.5 text-center align-middle"
                       >
                         {gwFixtures.length === 0 ? (
-                          <span className="text-gray-600">—</span>
+                          <span className="text-slate-600">—</span>
                         ) : (
                           <div className="flex flex-col gap-1 items-center">
                             {gwFixtures.map((fix, i) => (
@@ -223,7 +233,7 @@ export default function FixtureDifficultyGrid({
       </div>
 
       {/* Footer note */}
-      <p className="mt-3 text-xs text-gray-500">
+      <p className="mt-3 text-xs text-slate-500">
         Difficulty ratings from the official FPL API. Double gameweeks show two
         badges per cell. Squad players highlighted in blue.
       </p>

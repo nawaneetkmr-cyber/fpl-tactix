@@ -162,6 +162,8 @@ function getUpcomingFixtures(
     .filter(
       (f) =>
         !f.finished &&
+        f.event != null &&
+        f.event > 0 &&
         f.event >= currentGW &&
         f.event < currentGW + windowSize &&
         (f.team_h === teamId || f.team_a === teamId)
@@ -393,7 +395,10 @@ export function suggestNextGWCaptain(
   nextGW: number;
 } {
   // Find the actual next unfinished GW dynamically
-  const unfinishedFixtures = allFixtures.filter((f) => !f.finished);
+  // Filter out fixtures with null/0 event (unscheduled) to avoid Math.min coercing null to 0
+  const unfinishedFixtures = allFixtures.filter(
+    (f) => !f.finished && f.event != null && f.event > 0
+  );
   const nextGW =
     unfinishedFixtures.length > 0
       ? Math.min(...unfinishedFixtures.map((f) => f.event))
