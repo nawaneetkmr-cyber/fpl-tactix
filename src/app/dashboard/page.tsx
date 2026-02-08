@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, Suspense } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import FixtureDifficultyGrid from "@/components/FixtureDifficultyGrid";
 import PitchView from "@/components/PitchView";
@@ -11,7 +11,15 @@ import {
   FixtureDifficultyRow,
 } from "@/lib/projections";
 import { calculatePlayerProjections } from "@/lib/xpts";
-import type { FullElement, TeamStrength, FixtureDetail, PlayerProjection } from "@/lib/xpts";
+import type { FullElement, TeamStrength, FixtureDetail } from "@/lib/xpts";
+import {
+  buildTaggedTargets,
+  buildTransferPairs,
+  calculateSafetyScore,
+  type TaggedTarget,
+  type TransferPair,
+  type PlayerTag,
+} from "@/lib/advisor";
 
 // ---------- Types ----------
 
@@ -109,7 +117,6 @@ function DashboardInner() {
   // Bootstrap data for pitch and projections
   const [bootstrapElements, setBootstrapElements] = useState<BootstrapElement[]>([]);
   const [bootstrapTeams, setBootstrapTeams] = useState<BootstrapTeam[]>([]);
-  const [fixtures, setFixtures] = useState<FixtureDetail[]>([]);
   const [fixtureRows, setFixtureRows] = useState<FixtureDifficultyRow[]>([]);
   const [fixturesLoading, setFixturesLoading] = useState(true);
 
@@ -119,8 +126,9 @@ function DashboardInner() {
   >([]);
   const [captainGW, setCaptainGW] = useState<number | null>(null);
 
-  // Transfer targets
-  const [transferTargets, setTransferTargets] = useState<PlayerProjection[]>([]);
+  // Transfer brain: tagged targets + sell→buy pairs
+  const [taggedTargets, setTaggedTargets] = useState<TaggedTarget[]>([]);
+  const [transferPairs, setTransferPairs] = useState<TransferPair[]>([]);
 
   const fetchData = useCallback(async (id: string) => {
     if (!id) return;
@@ -152,7 +160,7 @@ function DashboardInner() {
     return () => clearInterval(interval);
   }, [teamId, fetchData]);
 
-  // Fetch bootstrap/fixture data
+  // Fetch bootstrap/fixture data + run transfer brain
   useEffect(() => {
     if (!data || data.error) return;
 
@@ -188,7 +196,6 @@ function DashboardInner() {
             finished: f.finished,
             started: f.started,
           }));
-        setFixtures(fixtureData);
 
         const teams: TeamStrength[] = (bootstrap.teams || []).map(
           (t: {
@@ -216,7 +223,7 @@ function DashboardInner() {
 
         const currentGW = bootstrap.currentGW || gameweek;
 
-        // Build fixture difficulty grid (for FPLFixture type)
+        // Build fixture difficulty grid
         const fplFixtures: FPLFixture[] = (bootstrap.fixtures || [])
           .filter((f: FPLFixture) => f.event != null && f.event > 0);
         const fplTeams = (bootstrap.teams || []).map(
@@ -229,7 +236,7 @@ function DashboardInner() {
         const rows = buildFixtureDifficultyGrid(fplFixtures, fplTeams, currentGW, 10);
         setFixtureRows(rows);
 
-        // Captain suggestions
+        // Build full element array for projections
         const squadIds = picks.map((p) => p.element);
         const allPlayers: FullElement[] = (bootstrap.elements || []).map(
           (e: FullElement) => ({
@@ -263,6 +270,7 @@ function DashboardInner() {
           })
         );
 
+        // Captain suggestions
         const { suggestions, nextGW } = suggestNextGWCaptain(
           squadIds,
           allPlayers,
@@ -273,18 +281,33 @@ function DashboardInner() {
         setCaptainSuggestions(suggestions);
         setCaptainGW(nextGW);
 
-        // Calculate transfer targets (players NOT in squad, sorted by xPts)
+        // --- TRANSFER BRAIN ---
         const allProjections = calculatePlayerProjections(
           allPlayers,
           teams,
           fixtureData,
           nextGW
         );
-        const nonSquadTargets = allProjections
-          .filter((p) => !squadIds.includes(p.player_id))
-          .filter((p) => p.minutes_probability >= 0.6) // Only likely starters
-          .slice(0, 5);
-        setTransferTargets(nonSquadTargets);
+
+        // Tagged targets (best non-squad players with strategic tags)
+        const tagged = buildTaggedTargets(
+          allProjections,
+          allPlayers,
+          fplTeams,
+          squadIds,
+          8
+        );
+        setTaggedTargets(tagged);
+
+        // Sell→Buy transfer pairs
+        const pairs = buildTransferPairs(
+          picks.map((p) => ({ element: p.element, position: p.position })),
+          allProjections,
+          allPlayers,
+          fplTeams,
+          5
+        );
+        setTransferPairs(pairs);
       } catch {
         // Silent fail
       }
@@ -371,21 +394,14 @@ function DashboardInner() {
     data.prevOverallRank && rankChange
       ? ((rankChange / data.prevOverallRank) * 100).toFixed(1)
       : null;
-  // Safety score: absolute 0-100 based on rank position
-  const safetyScore =
-    data.totalPlayers > 0
-      ? Math.round((1 - data.estimatedLiveRank / data.totalPlayers) * 100)
-      : null;
-  // GW movement: positive = improved, negative = declined
+
+  // Safety score: GW-performance based (50 = average, scales by std dev)
+  const safetyScore = calculateSafetyScore(data.livePoints, data.averageScore);
   const safetyDelta = rankChange !== null
     ? (rankChange > 0 ? "up" : rankChange < 0 ? "down" : "flat")
     : null;
 
   const squadTeamIds = [...new Set(data.picks.map((p) => p.teamId).filter((id) => id > 0))];
-
-  // Build team map for transfer targets
-  const teamMap = new Map(bootstrapTeams.map((t) => [t.id, t]));
-  const elementMap = new Map(bootstrapElements.map((e) => [e.id, e]));
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-8 bg-slate-950 min-h-screen">
@@ -481,44 +497,129 @@ function DashboardInner() {
                 : undefined
             }
           />
+          {/* Safety Score: GW performance based */}
           <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700">
             <div className="text-sm text-slate-400 uppercase tracking-wider mb-1">
               Safety Score
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-3xl font-bold text-slate-50">
-                {safetyScore ?? "-"}
+              <span className={`text-3xl font-bold ${
+                safetyScore >= 60 ? "text-emerald-400" : safetyScore >= 40 ? "text-amber-400" : "text-red-400"
+              }`}>
+                {safetyScore}
               </span>
               <span className="text-xs text-slate-500">/100</span>
               {safetyDelta === "up" && (
-                <span className="text-emerald-400 text-lg" title="Improved this GW">▲</span>
+                <span className="text-emerald-400 text-lg" title="Rank improved this GW">▲</span>
               )}
               {safetyDelta === "down" && (
-                <span className="text-red-400 text-lg" title="Declined this GW">▼</span>
+                <span className="text-red-400 text-lg" title="Rank declined this GW">▼</span>
               )}
               {safetyDelta === "flat" && (
                 <span className="text-slate-500 text-lg" title="Unchanged">—</span>
               )}
             </div>
             <div className="text-xs text-slate-500 mt-1">
-              {rankChange !== null && rankChange !== 0
-                ? `${rankChange > 0 ? "+" : ""}${formatRank(rankChange)} rank this GW`
-                : "Current GW"}
+              {data.livePoints >= data.averageScore
+                ? `+${data.livePoints - data.averageScore} vs avg`
+                : `${data.livePoints - data.averageScore} vs avg`}
+              {rankChange !== null && rankChange !== 0 && (
+                <span>
+                  {" · "}
+                  {rankChange > 0 ? "+" : ""}{formatRank(rankChange)} rank
+                </span>
+              )}
             </div>
           </div>
         </div>
       </section>
 
-      {/* ===== SECTION 3: TRANSFER OPPORTUNITIES ===== */}
+      {/* ===== SECTION 3: TRANSFER BRAIN ===== */}
       <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
-        <h2 className="text-2xl font-bold text-slate-50 mb-6">
-          Best Transfer Targets (Next 3 GW)
+        <h2 className="text-2xl font-bold text-slate-50 mb-2">
+          Transfer Brain
         </h2>
+        <p className="text-sm text-slate-400 mb-6">
+          AI-powered sell → buy recommendations with strategic tags
+        </p>
+
         {fixturesLoading ? (
           <div className="flex justify-center py-8">
             <div className="spinner" />
           </div>
-        ) : transferTargets.length > 0 ? (
+        ) : transferPairs.length > 0 ? (
+          <div className="space-y-4">
+            {transferPairs.map((pair) => (
+              <div
+                key={`${pair.playerOut.id}-${pair.playerIn.playerId}`}
+                className="bg-slate-800 rounded-lg p-4 border border-slate-700"
+              >
+                {/* Sell → Buy header */}
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-red-600/20 text-red-400 border border-red-500/30">
+                    SELL
+                  </span>
+                  <span className="text-slate-50 font-medium">
+                    {pair.playerOut.webName}
+                  </span>
+                  <span className="text-slate-500 text-sm">
+                    ({pair.playerOut.teamShortName})
+                  </span>
+                  <span className="text-slate-500 text-sm">
+                    {pair.playerOut.xPts.toFixed(1)} xPts
+                  </span>
+                  {pair.playerOut.tags.map((t) => (
+                    <TagBadge key={t.id} tag={t} />
+                  ))}
+
+                  <span className="text-slate-500 mx-2">→</span>
+
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-600/20 text-emerald-400 border border-emerald-500/30">
+                    BUY
+                  </span>
+                  <span className="text-slate-50 font-medium">
+                    {pair.playerIn.webName}
+                  </span>
+                  <span className="text-slate-500 text-sm">
+                    ({pair.playerIn.teamShortName})
+                  </span>
+                  <span className="text-emerald-400 text-sm font-semibold">
+                    {pair.playerIn.xPts.toFixed(1)} xPts
+                  </span>
+                  {pair.playerIn.tags.map((t) => (
+                    <TagBadge key={t.id} tag={t} />
+                  ))}
+                </div>
+
+                {/* Stats row */}
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-emerald-400 font-semibold">
+                    +{pair.xpGain.toFixed(1)} xPts gain
+                  </span>
+                  {pair.budgetDelta > 0 && (
+                    <span className="text-amber-400">
+                      +£{pair.budgetDelta.toFixed(1)}m saved
+                    </span>
+                  )}
+                  {pair.budgetDelta < 0 && (
+                    <span className="text-slate-400">
+                      -£{Math.abs(pair.budgetDelta).toFixed(1)}m
+                    </span>
+                  )}
+                  <span className="text-slate-500">
+                    £{(pair.playerIn.price / 10).toFixed(1)}m
+                  </span>
+                </div>
+
+                {/* Reasoning */}
+                <p className="text-xs text-slate-400 mt-2 italic">
+                  {pair.reasoning}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : taggedTargets.length > 0 ? (
+          /* Fallback: show tagged targets table if no pairs found */
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -526,33 +627,40 @@ function DashboardInner() {
                   <th className="pb-3 font-medium">Player</th>
                   <th className="pb-3 font-medium">Pos</th>
                   <th className="pb-3 font-medium">Team</th>
+                  <th className="pb-3 font-medium">Tags</th>
                   <th className="pb-3 font-medium text-right">Price</th>
                   <th className="pb-3 font-medium text-right">xPts</th>
                 </tr>
               </thead>
               <tbody>
-                {transferTargets.map((target) => {
-                  const team = teamMap.get(target.team_id);
-                  const element = elementMap.get(target.player_id);
-                  return (
-                    <tr
-                      key={target.player_id}
-                      className="border-t border-slate-700 hover:bg-slate-800/50"
-                    >
-                      <td className="py-3 font-medium text-slate-50">{target.web_name}</td>
-                      <td className="py-3 text-slate-400">
-                        {positionLabel(target.position)}
-                      </td>
-                      <td className="py-3 text-slate-400">{team?.short_name ?? "-"}</td>
-                      <td className="py-3 text-right text-slate-50">
-                        £{element ? (element.now_cost / 10).toFixed(1) : "-"}m
-                      </td>
-                      <td className="py-3 text-right font-semibold text-emerald-400">
-                        {target.expected_points.toFixed(1)}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {taggedTargets.map((target) => (
+                  <tr
+                    key={target.playerId}
+                    className="border-t border-slate-700 hover:bg-slate-800/50"
+                  >
+                    <td className="py-3 font-medium text-slate-50">{target.webName}</td>
+                    <td className="py-3 text-slate-400">
+                      {positionLabel(target.position)}
+                    </td>
+                    <td className="py-3 text-slate-400">{target.teamShortName}</td>
+                    <td className="py-3">
+                      <div className="flex gap-1 flex-wrap">
+                        {target.tags.map((t) => (
+                          <TagBadge key={t.id} tag={t} />
+                        ))}
+                        {target.tags.length === 0 && (
+                          <span className="text-slate-600 text-xs">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 text-right text-slate-50">
+                      £{(target.price / 10).toFixed(1)}m
+                    </td>
+                    <td className="py-3 text-right font-semibold text-emerald-400">
+                      {target.xPts.toFixed(1)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -642,6 +750,16 @@ function DashboardInner() {
         )}
       </section>
     </div>
+  );
+}
+
+// ---------- Tag Badge Component ----------
+
+function TagBadge({ tag }: { tag: PlayerTag }) {
+  return (
+    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${tag.bgColor}`}>
+      {tag.emoji} {tag.label}
+    </span>
   );
 }
 
