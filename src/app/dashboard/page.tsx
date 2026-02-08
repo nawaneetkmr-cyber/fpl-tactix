@@ -371,10 +371,15 @@ function DashboardInner() {
     data.prevOverallRank && rankChange
       ? ((rankChange / data.prevOverallRank) * 100).toFixed(1)
       : null;
-  const safetyPercentile =
+  // Safety score: absolute 0-100 based on rank position
+  const safetyScore =
     data.totalPlayers > 0
-      ? ((1 - data.estimatedLiveRank / data.totalPlayers) * 100).toFixed(1)
+      ? Math.round((1 - data.estimatedLiveRank / data.totalPlayers) * 100)
       : null;
+  // GW movement: positive = improved, negative = declined
+  const safetyDelta = rankChange !== null
+    ? (rankChange > 0 ? "up" : rankChange < 0 ? "down" : "flat")
+    : null;
 
   const squadTeamIds = [...new Set(data.picks.map((p) => p.teamId).filter((id) => id > 0))];
 
@@ -476,11 +481,31 @@ function DashboardInner() {
                 : undefined
             }
           />
-          <StatCard
-            label="Safety Score"
-            value={safetyPercentile ? `Top ${safetyPercentile}%` : "-"}
-            sublabel="Percentile"
-          />
+          <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700">
+            <div className="text-sm text-slate-400 uppercase tracking-wider mb-1">
+              Safety Score
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-3xl font-bold text-slate-50">
+                {safetyScore ?? "-"}
+              </span>
+              <span className="text-xs text-slate-500">/100</span>
+              {safetyDelta === "up" && (
+                <span className="text-emerald-400 text-lg" title="Improved this GW">▲</span>
+              )}
+              {safetyDelta === "down" && (
+                <span className="text-red-400 text-lg" title="Declined this GW">▼</span>
+              )}
+              {safetyDelta === "flat" && (
+                <span className="text-slate-500 text-lg" title="Unchanged">—</span>
+              )}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">
+              {rankChange !== null && rankChange !== 0
+                ? `${rankChange > 0 ? "+" : ""}${formatRank(rankChange)} rank this GW`
+                : "Current GW"}
+            </div>
+          </div>
         </div>
       </section>
 
