@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import FixtureDifficultyGrid from "@/components/FixtureDifficultyGrid";
 import PitchView from "@/components/PitchView";
@@ -176,8 +176,9 @@ function DashboardInner() {
         setBootstrapElements(bootstrap.elements || []);
         setBootstrapTeams(bootstrap.teams || []);
 
-        const fixtureData: FixtureDetail[] = (bootstrap.fixtures || []).map(
-          (f: FPLFixture) => ({
+        const fixtureData: FixtureDetail[] = (bootstrap.fixtures || [])
+          .filter((f: FPLFixture) => f.event != null && f.event > 0)
+          .map((f: FPLFixture) => ({
             id: f.id,
             event: f.event,
             team_h: f.team_h,
@@ -186,8 +187,7 @@ function DashboardInner() {
             team_a_difficulty: f.team_a_difficulty,
             finished: f.finished,
             started: f.started,
-          })
-        );
+          }));
         setFixtures(fixtureData);
 
         const teams: TeamStrength[] = (bootstrap.teams || []).map(
@@ -217,9 +217,8 @@ function DashboardInner() {
         const currentGW = bootstrap.currentGW || gameweek;
 
         // Build fixture difficulty grid (for FPLFixture type)
-        const fplFixtures: FPLFixture[] = (bootstrap.fixtures || []).map(
-          (f: FPLFixture) => f
-        );
+        const fplFixtures: FPLFixture[] = (bootstrap.fixtures || [])
+          .filter((f: FPLFixture) => f.event != null && f.event > 0);
         const fplTeams = (bootstrap.teams || []).map(
           (t: { id: number; name: string; short_name: string }) => ({
             id: t.id,
@@ -310,8 +309,8 @@ function DashboardInner() {
   if (!teamId) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
-        <h1 className="text-3xl font-bold mb-2">FPL Tactix</h1>
-        <p className="text-gray-400 mb-8 text-center">
+        <h1 className="text-3xl font-bold text-slate-50 mb-2">FPL Tactix</h1>
+        <p className="text-slate-400 mb-8 text-center">
           Enter your FPL Team ID to view your dashboard
         </p>
         <form onSubmit={handleSubmit} className="flex gap-3 w-full max-w-sm">
@@ -321,16 +320,16 @@ function DashboardInner() {
             placeholder="Team ID (e.g. 123456)"
             value={inputId}
             onChange={(e) => setInputId(e.target.value)}
-            className="flex-1 px-4 py-3 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
+            className="flex-1 px-4 py-3 rounded-lg bg-slate-800 border border-slate-700 text-slate-50 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           />
           <button
             type="submit"
-            className="px-6 py-3 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-500 transition-colors"
+            className="px-6 py-3 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-500 transition-colors"
           >
             Go
           </button>
         </form>
-        <p className="text-gray-500 text-sm mt-4">
+        <p className="text-slate-500 text-sm mt-4">
           Find your Team ID in the FPL app under Points → URL
         </p>
       </div>
@@ -342,7 +341,7 @@ function DashboardInner() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
         <div className="spinner mb-4" />
-        <p className="text-gray-400">Loading live data...</p>
+        <p className="text-slate-400">Loading live data...</p>
       </div>
     );
   }
@@ -354,7 +353,7 @@ function DashboardInner() {
         <p className="text-red-400 mb-4">Error: {data.error}</p>
         <button
           onClick={() => fetchData(teamId)}
-          className="px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600"
+          className="px-4 py-2 rounded-lg bg-slate-700 text-slate-50 hover:bg-slate-600"
         >
           Retry
         </button>
@@ -377,36 +376,36 @@ function DashboardInner() {
       ? ((1 - data.estimatedLiveRank / data.totalPlayers) * 100).toFixed(1)
       : null;
 
-  const squadTeamIds = [...new Set(data.picks.map((p) => p.teamId))];
+  const squadTeamIds = [...new Set(data.picks.map((p) => p.teamId).filter((id) => id > 0))];
 
   // Build team map for transfer targets
   const teamMap = new Map(bootstrapTeams.map((t) => [t.id, t]));
   const elementMap = new Map(bootstrapElements.map((e) => [e.id, e]));
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-8">
+    <div className="max-w-5xl mx-auto px-4 py-6 space-y-8 bg-slate-950 min-h-screen">
       {/* ===== HEADER ===== */}
-      <header className="sticky top-0 z-20 -mx-4 px-4 py-4 bg-gray-900/95 backdrop-blur border-b border-gray-800">
+      <header className="sticky top-0 z-20 -mx-4 px-4 py-4 bg-slate-950/95 backdrop-blur border-b border-slate-700">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">{data.teamName}</h1>
-            <p className="text-gray-400 text-sm">{data.playerName}</p>
+            <h1 className="text-2xl font-bold text-slate-50">{data.teamName}</h1>
+            <p className="text-slate-400 text-sm">{data.playerName}</p>
           </div>
           <div className="flex items-center gap-6 text-sm">
             <div className="text-center">
-              <div className="text-gray-400">GW{data.gameweek}</div>
-              <div className="text-xl font-bold text-green-400">{data.livePoints}</div>
+              <div className="text-slate-400">GW{data.gameweek}</div>
+              <div className="text-xl font-bold text-emerald-400">{data.livePoints}</div>
             </div>
             <div className="text-center">
-              <div className="text-gray-400">Rank</div>
-              <div className="text-xl font-bold">{formatRank(data.estimatedLiveRank)}</div>
+              <div className="text-slate-400">Rank</div>
+              <div className="text-xl font-bold text-slate-50">{formatRank(data.estimatedLiveRank)}</div>
             </div>
             {rankChange !== null && (
               <div className="text-center">
-                <div className="text-gray-400">Change</div>
+                <div className="text-slate-400">Change</div>
                 <div
                   className={`text-lg font-semibold ${
-                    rankChange > 0 ? "text-green-400" : rankChange < 0 ? "text-red-400" : "text-gray-400"
+                    rankChange > 0 ? "text-emerald-400" : rankChange < 0 ? "text-red-400" : "text-slate-400"
                   }`}
                 >
                   {rankChange > 0 ? "+" : ""}
@@ -416,11 +415,11 @@ function DashboardInner() {
             )}
             <div className="flex items-center gap-2">
               {loading && <div className="spinner w-4 h-4" />}
-              <span className="px-2 py-1 rounded text-xs font-semibold bg-green-600 text-white animate-pulse">
+              <span className="px-2 py-1 rounded text-xs font-semibold bg-emerald-600 text-white animate-pulse">
                 LIVE
               </span>
               {lastUpdate && (
-                <span className="text-gray-500 text-xs">
+                <span className="text-slate-500 text-xs">
                   {lastUpdate.toLocaleTimeString()}
                 </span>
               )}
@@ -486,8 +485,8 @@ function DashboardInner() {
       </section>
 
       {/* ===== SECTION 3: TRANSFER OPPORTUNITIES ===== */}
-      <section>
-        <h2 className="text-lg font-bold mb-4 pb-2 border-b border-gray-700">
+      <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
+        <h2 className="text-2xl font-bold text-slate-50 mb-6">
           Best Transfer Targets (Next 3 GW)
         </h2>
         {fixturesLoading ? (
@@ -498,7 +497,7 @@ function DashboardInner() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-gray-400 text-left">
+                <tr className="text-slate-400 text-left">
                   <th className="pb-3 font-medium">Player</th>
                   <th className="pb-3 font-medium">Pos</th>
                   <th className="pb-3 font-medium">Team</th>
@@ -513,17 +512,17 @@ function DashboardInner() {
                   return (
                     <tr
                       key={target.player_id}
-                      className="border-t border-gray-800 hover:bg-gray-800/50"
+                      className="border-t border-slate-700 hover:bg-slate-800/50"
                     >
-                      <td className="py-3 font-medium">{target.web_name}</td>
-                      <td className="py-3 text-gray-400">
+                      <td className="py-3 font-medium text-slate-50">{target.web_name}</td>
+                      <td className="py-3 text-slate-400">
                         {positionLabel(target.position)}
                       </td>
-                      <td className="py-3 text-gray-400">{team?.short_name ?? "-"}</td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-slate-400">{team?.short_name ?? "-"}</td>
+                      <td className="py-3 text-right text-slate-50">
                         £{element ? (element.now_cost / 10).toFixed(1) : "-"}m
                       </td>
-                      <td className="py-3 text-right font-semibold text-green-400">
+                      <td className="py-3 text-right font-semibold text-emerald-400">
                         {target.expected_points.toFixed(1)}
                       </td>
                     </tr>
@@ -533,13 +532,13 @@ function DashboardInner() {
             </table>
           </div>
         ) : (
-          <p className="text-gray-500 py-4">No transfer suggestions available</p>
+          <p className="text-slate-500 py-4">No transfer suggestions available</p>
         )}
       </section>
 
       {/* ===== SECTION 4: CAPTAIN PICK ===== */}
-      <section>
-        <h2 className="text-lg font-bold mb-4 pb-2 border-b border-gray-700">
+      <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
+        <h2 className="text-2xl font-bold text-slate-50 mb-6">
           Captain Pick (GW{captainGW ?? data.gameweek})
         </h2>
         {fixturesLoading ? (
@@ -553,39 +552,39 @@ function DashboardInner() {
                 key={s.element}
                 className={`flex items-center justify-between p-4 rounded-lg ${
                   idx === 0
-                    ? "bg-gradient-to-r from-green-900/30 to-green-800/10 border border-green-700"
-                    : "bg-gray-800/50"
+                    ? "bg-gradient-to-r from-emerald-900/40 to-emerald-800/10 border border-emerald-700"
+                    : "bg-slate-800"
                 }`}
               >
                 <div className="flex items-center gap-4">
                   <span
                     className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
                       idx === 0
-                        ? "bg-green-500 text-black"
+                        ? "bg-emerald-500 text-black"
                         : idx === 1
-                          ? "bg-gray-400 text-black"
+                          ? "bg-slate-400 text-black"
                           : "bg-amber-700 text-white"
                     }`}
                   >
                     {idx + 1}
                   </span>
                   <div>
-                    <div className="font-semibold">{s.webName}</div>
-                    <div className="text-sm text-gray-400">{s.fixtureLabel}</div>
+                    <div className="font-semibold text-slate-50">{s.webName}</div>
+                    <div className="text-sm text-slate-400">{s.fixtureLabel}</div>
                   </div>
                 </div>
                 <div className="text-right">
                   <div
                     className={`text-xl font-bold ${
-                      idx === 0 ? "text-green-400" : "text-white"
+                      idx === 0 ? "text-emerald-400" : "text-slate-50"
                     }`}
                   >
                     {s.xPts.toFixed(1)}
                   </div>
-                  <div className="text-xs text-gray-500">xPts</div>
+                  <div className="text-xs text-slate-500">xPts</div>
                 </div>
                 {idx === 0 && (
-                  <span className="ml-4 px-2 py-1 rounded text-xs font-semibold bg-green-600 text-white">
+                  <span className="ml-4 px-2 py-1 rounded text-xs font-semibold bg-emerald-600 text-white">
                     Best Pick
                   </span>
                 )}
@@ -593,13 +592,13 @@ function DashboardInner() {
             ))}
           </div>
         ) : (
-          <p className="text-gray-500 py-4">No captain suggestions available</p>
+          <p className="text-slate-500 py-4">No captain suggestions available</p>
         )}
       </section>
 
       {/* ===== SECTION 5: FIXTURE DIFFICULTY GRID ===== */}
-      <section>
-        <h2 className="text-lg font-bold mb-4 pb-2 border-b border-gray-700">
+      <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
+        <h2 className="text-2xl font-bold text-slate-50 mb-6">
           Fixture Difficulty (Next 10 GWs)
         </h2>
         {fixturesLoading ? (
@@ -614,7 +613,7 @@ function DashboardInner() {
             highlightTeamIds={squadTeamIds}
           />
         ) : (
-          <p className="text-gray-500 py-4">Unable to load fixture data</p>
+          <p className="text-slate-500 py-4">Unable to load fixture data</p>
         )}
       </section>
     </div>
@@ -635,16 +634,16 @@ function StatCard({
   accent?: boolean;
 }) {
   return (
-    <div className="p-4 rounded-xl bg-gray-800/50 border border-gray-700">
-      <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">
+    <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700">
+      <div className="text-sm text-slate-400 uppercase tracking-wider mb-1">
         {label}
       </div>
       <div
-        className={`text-2xl font-bold ${accent ? "text-green-400" : "text-white"}`}
+        className={`text-3xl font-bold ${accent ? "text-emerald-400" : "text-slate-50"}`}
       >
         {value}
       </div>
-      {sublabel && <div className="text-xs text-gray-500 mt-1">{sublabel}</div>}
+      {sublabel && <div className="text-xs text-slate-500 mt-1">{sublabel}</div>}
     </div>
   );
 }

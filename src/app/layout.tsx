@@ -14,7 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">
+      <body className="antialiased bg-slate-950 text-slate-50">
         <nav
           style={{
             display: "flex",
