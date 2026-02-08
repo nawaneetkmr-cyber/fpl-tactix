@@ -176,10 +176,18 @@ export function buildTaggedTargets(
   const teamMap = new Map(teams.map((t) => [t.id, t.short_name]));
   const squadSet = new Set(squadIds);
 
-  // Filter to non-squad, likely starters
-  const candidates = projections.filter(
-    (p) => !squadSet.has(p.player_id) && p.minutes_probability >= 0.6,
-  );
+  // Filter to non-squad, reliable starters only
+  // minutes_probability >= 0.6 AND minimum 5 starts to avoid low-sample inflation
+  const candidates = projections.filter((p) => {
+    if (squadSet.has(p.player_id)) return false;
+    if (p.minutes_probability < 0.6) return false;
+    const el = elementMap.get(p.player_id);
+    if (!el) return false;
+    // Hard filter: must have meaningful game time
+    if (el.starts < 5) return false;
+    if (el.minutes < 400) return false;
+    return true;
+  });
 
   return candidates.slice(0, maxResults).map((proj) => {
     const el = elementMap.get(proj.player_id);
@@ -259,12 +267,14 @@ export function buildTransferPairs(
     const outTags = outEl ? tagPlayer(outEl, outProj, projections) : [];
 
     // Find best replacement at same position within budget
+    // Hard filter: must have >= 5 starts and >= 400 minutes to avoid low-sample picks
     const candidates = projections.filter((p) => {
       if (squadIds.has(p.player_id)) return false;
       if (p.minutes_probability < 0.6) return false;
       const cEl = elementMap.get(p.player_id);
       if (!cEl) return false;
       if (cEl.element_type !== outEl.element_type) return false;
+      if (cEl.starts < 5 || cEl.minutes < 400) return false;
       // Team limit: after removing outEl's team slot, can we add this player?
       const currentTeamCount = teamCounts.get(cEl.team) ?? 0;
       const adjustedCount =

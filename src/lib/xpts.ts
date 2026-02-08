@@ -300,25 +300,51 @@ function calculateCleanSheetProbability(
 }
 
 function calculateMinutesProbability(el: FullElement): number {
-  const gamesPlayed = Math.max(Math.ceil(el.minutes / 90), 1);
-  const minutesShare = Math.min(el.minutes / (gamesPlayed * 90), 1);
-  const startRate = Math.min(el.starts / gamesPlayed, 1);
-  const usageRate = Math.max(minutesShare, startRate);
-
-  // Use chance_of_playing_next_round if available
-  if (el.chance_of_playing_next_round !== null) {
-    return Math.min((el.chance_of_playing_next_round / 100) * usageRate, 0.95);
+  // Injured / unavailable / suspended — always 0
+  if (el.status === "i" || el.status === "u" || el.status === "s" || el.status === "n") {
+    return 0.0;
   }
 
-  // Use status
-  if (el.status === "a") return Math.min(0.95 * usageRate, 0.95); // available
-  if (el.status === "d") return Math.min(0.5 * usageRate, 0.95); // doubtful
-  if (el.status === "i" || el.status === "u" || el.status === "s")
-    return 0.0; // injured/unavailable/suspended
-  if (el.status === "n") return 0.0; // not available
+  // Estimate how many GWs have been played in the season so far.
+  // A full-time starter would have ~(GW * 90) minutes. Use total_points
+  // as a proxy: even 2 pts/game * 25 GWs = 50, so if total_points > 0
+  // and starts are low relative to what we'd expect, penalize.
+  // Approximate season GWs from total minutes across all players:
+  // We use starts as the numerator and estimate denominator from minutes context.
+  const seasonGWsEstimate = Math.max(
+    Math.ceil(el.minutes > 0 ? el.minutes / (90 * Math.max(el.starts, 1)) * el.starts : 0),
+    el.starts,
+    1
+  );
 
-  // Fallback: estimate from starts and minutes
-  return Math.min(usageRate, 0.95);
+  // How many GWs has this player actually started out of the season so far?
+  // Use a conservative denominator: at least 20 GWs into the season by mid-season
+  const seasonLength = Math.max(seasonGWsEstimate, 20);
+  const startRate = el.starts / seasonLength;
+
+  // Minutes share: what fraction of available minutes has this player played?
+  const expectedMinutes = seasonLength * 90;
+  const minutesShare = Math.min(el.minutes / expectedMinutes, 1);
+
+  // Usage rate: blend of start rate and minutes share
+  const usageRate = Math.max(startRate, minutesShare);
+
+  // Hard floor: players with < 5 starts are unreliable regardless of other signals
+  const reliabilityPenalty = el.starts < 5 ? 0.4 : el.starts < 10 ? 0.7 : 1.0;
+
+  // Use chance_of_playing_next_round if available (FPL's own flag)
+  if (el.chance_of_playing_next_round !== null) {
+    const fplProb = el.chance_of_playing_next_round / 100;
+    return Math.min(fplProb * usageRate * reliabilityPenalty, 0.95);
+  }
+
+  // Status-based
+  if (el.status === "d") {
+    return Math.min(0.5 * usageRate * reliabilityPenalty, 0.95); // doubtful
+  }
+
+  // Available
+  return Math.min(0.95 * usageRate * reliabilityPenalty, 0.95);
 }
 
 function calculateBonusProjection(
