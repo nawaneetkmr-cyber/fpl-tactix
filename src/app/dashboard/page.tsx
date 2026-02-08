@@ -10,16 +10,8 @@ import {
   FPLFixture,
   FixtureDifficultyRow,
 } from "@/lib/projections";
-import { calculatePlayerProjections } from "@/lib/xpts";
 import type { FullElement, TeamStrength, FixtureDetail } from "@/lib/xpts";
-import {
-  buildTaggedTargets,
-  buildTransferPairs,
-  calculateSafetyScore,
-  type TaggedTarget,
-  type TransferPair,
-  type PlayerTag,
-} from "@/lib/advisor";
+import { calculateSafetyScore } from "@/lib/advisor";
 
 // ---------- Types ----------
 
@@ -143,9 +135,6 @@ function DashboardInner() {
   >([]);
   const [captainGW, setCaptainGW] = useState<number | null>(null);
 
-  // Transfer brain: tagged targets + sell→buy pairs
-  const [taggedTargets, setTaggedTargets] = useState<TaggedTarget[]>([]);
-  const [transferPairs, setTransferPairs] = useState<TransferPair[]>([]);
 
   const fetchData = useCallback(async (id: string) => {
     if (!id) return;
@@ -298,33 +287,6 @@ function DashboardInner() {
         setCaptainSuggestions(suggestions);
         setCaptainGW(nextGW);
 
-        // --- TRANSFER BRAIN ---
-        const allProjections = calculatePlayerProjections(
-          allPlayers,
-          teams,
-          fixtureData,
-          nextGW
-        );
-
-        // Tagged targets (best non-squad players with strategic tags)
-        const tagged = buildTaggedTargets(
-          allProjections,
-          allPlayers,
-          fplTeams,
-          squadIds,
-          8
-        );
-        setTaggedTargets(tagged);
-
-        // Sell→Buy transfer pairs
-        const pairs = buildTransferPairs(
-          picks.map((p) => ({ element: p.element, position: p.position })),
-          allProjections,
-          allPlayers,
-          fplTeams,
-          5
-        );
-        setTransferPairs(pairs);
       } catch {
         // Silent fail
       }
@@ -551,138 +513,135 @@ function DashboardInner() {
         </div>
       </section>
 
-      {/* ===== SECTION 3: TRANSFER BRAIN ===== */}
+      {/* ===== SECTION 3: TRANSFER BRAIN (MILP) ===== */}
       <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
         <h2 className="text-2xl font-bold text-slate-50 mb-2">
           Transfer Brain
         </h2>
         <p className="text-sm text-slate-400 mb-6">
-          AI-powered sell → buy recommendations with strategic tags
+          MILP-optimized transfers with budget, formation &amp; hit-cost constraints
         </p>
 
-        {fixturesLoading ? (
-          <div className="flex justify-center py-8">
-            <div className="spinner" />
-          </div>
-        ) : transferPairs.length > 0 ? (
-          <div className="space-y-4">
-            {transferPairs.map((pair) => (
-              <div
-                key={`${pair.playerOut.id}-${pair.playerIn.playerId}`}
-                className="bg-slate-800 rounded-lg p-4 border border-slate-700"
-              >
-                {/* Sell → Buy header */}
-                <div className="flex items-center gap-3 mb-3">
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-red-600/20 text-red-400 border border-red-500/30">
-                    SELL
-                  </span>
-                  <span className="text-slate-50 font-medium">
-                    {pair.playerOut.webName}
-                  </span>
-                  <span className="text-slate-500 text-sm">
-                    ({pair.playerOut.teamShortName})
-                  </span>
-                  <span className="text-slate-500 text-sm">
-                    {pair.playerOut.xPts.toFixed(1)} xPts
-                  </span>
-                  {pair.playerOut.tags.map((t) => (
-                    <TagBadge key={t.id} tag={t} />
-                  ))}
-
-                  <span className="text-slate-500 mx-2">→</span>
-
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-600/20 text-emerald-400 border border-emerald-500/30">
-                    BUY
-                  </span>
-                  <span className="text-slate-50 font-medium">
-                    {pair.playerIn.webName}
-                  </span>
-                  <span className="text-slate-500 text-sm">
-                    ({pair.playerIn.teamShortName})
-                  </span>
-                  <span className="text-emerald-400 text-sm font-semibold">
-                    {pair.playerIn.xPts.toFixed(1)} xPts
-                  </span>
-                  {pair.playerIn.tags.map((t) => (
-                    <TagBadge key={t.id} tag={t} />
-                  ))}
-                </div>
-
-                {/* Stats row */}
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-emerald-400 font-semibold">
-                    +{pair.xpGain.toFixed(1)} xPts gain
-                  </span>
-                  {pair.budgetDelta > 0 && (
-                    <span className="text-amber-400">
-                      +£{pair.budgetDelta.toFixed(1)}m saved
-                    </span>
-                  )}
-                  {pair.budgetDelta < 0 && (
-                    <span className="text-slate-400">
-                      -£{Math.abs(pair.budgetDelta).toFixed(1)}m
-                    </span>
-                  )}
-                  <span className="text-slate-500">
-                    £{(pair.playerIn.price / 10).toFixed(1)}m
-                  </span>
-                </div>
-
-                {/* Reasoning */}
-                <p className="text-xs text-slate-400 mt-2 italic">
-                  {pair.reasoning}
-                </p>
-              </div>
-            ))}
-          </div>
-        ) : taggedTargets.length > 0 ? (
-          /* Fallback: show tagged targets table if no pairs found */
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-slate-400 text-left">
-                  <th className="pb-3 font-medium">Player</th>
-                  <th className="pb-3 font-medium">Pos</th>
-                  <th className="pb-3 font-medium">Team</th>
-                  <th className="pb-3 font-medium">Tags</th>
-                  <th className="pb-3 font-medium text-right">Price</th>
-                  <th className="pb-3 font-medium text-right">xPts</th>
-                </tr>
-              </thead>
-              <tbody>
-                {taggedTargets.map((target) => (
-                  <tr
-                    key={target.playerId}
-                    className="border-t border-slate-700 hover:bg-slate-800/50"
-                  >
-                    <td className="py-3 font-medium text-slate-50">{target.webName}</td>
-                    <td className="py-3 text-slate-400">
-                      {positionLabel(target.position)}
-                    </td>
-                    <td className="py-3 text-slate-400">{target.teamShortName}</td>
-                    <td className="py-3">
-                      <div className="flex gap-1 flex-wrap">
-                        {target.tags.map((t) => (
-                          <TagBadge key={t.id} tag={t} />
-                        ))}
-                        {target.tags.length === 0 && (
-                          <span className="text-slate-600 text-xs">—</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 text-right text-slate-50">
-                      £{(target.price / 10).toFixed(1)}m
-                    </td>
-                    <td className="py-3 text-right font-semibold text-emerald-400">
-                      {target.xPts.toFixed(1)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {!data.milpOptimization ? (
+          <p className="text-slate-500 py-4">Optimizer loading or unavailable...</p>
+        ) : data.milpOptimization.status !== "Optimal" ? (
+          <p className="text-red-400 py-4">Solver status: {data.milpOptimization.status}</p>
+        ) : data.milpOptimization.transfers_in.length === 0 ? (
+          <div className="bg-slate-800 rounded-lg p-5 border border-emerald-700/40">
+            <p className="text-emerald-400 font-semibold text-lg">No transfers needed</p>
+            <p className="text-slate-400 text-sm mt-1">
+              Your squad is already optimal — save the free transfer for next week.
+            </p>
           </div>
         ) : (
-          <p className="text-slate-500 py-4">No transfer suggestions available</p>
+          <div className="space-y-4">
+            {/* Verdict banner */}
+            <div className={`rounded-lg p-4 border ${
+              data.milpOptimization.should_roll
+                ? "bg-amber-900/20 border-amber-700/40"
+                : "bg-emerald-900/20 border-emerald-700/40"
+            }`}>
+              <div className="flex items-center gap-3 mb-1">
+                <span className={`text-lg font-bold ${
+                  data.milpOptimization.should_roll ? "text-amber-400" : "text-emerald-400"
+                }`}>
+                  {data.milpOptimization.should_roll ? "ROLL TRANSFER" : "MAKE TRANSFER"}
+                </span>
+                <span className={`text-sm font-medium px-2 py-0.5 rounded ${
+                  data.milpOptimization.net_improvement > 0
+                    ? "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30"
+                    : "bg-red-600/20 text-red-400 border border-red-500/30"
+                }`}>
+                  {data.milpOptimization.net_improvement > 0 ? "+" : ""}
+                  {data.milpOptimization.net_improvement} xPts net gain
+                </span>
+              </div>
+              {data.milpOptimization.should_roll && (
+                <p className="text-amber-300/70 text-sm">
+                  Best possible move is below the 2.0pt threshold — save your FT.
+                </p>
+              )}
+              <div className="flex gap-4 mt-2 text-xs text-slate-400">
+                <span>Current: {data.milpOptimization.current_team_xp} xP</span>
+                <span>→</span>
+                <span>Optimized: {data.milpOptimization.total_xp} xP</span>
+                {data.milpOptimization.hit_cost > 0 && (
+                  <span className="text-red-400">-{data.milpOptimization.hit_cost} hit cost</span>
+                )}
+              </div>
+            </div>
+
+            {/* Transfer cards */}
+            {data.milpOptimization.transfers_out.map((pOut, idx) => {
+              const pIn = data.milpOptimization!.transfers_in[idx];
+              if (!pIn) return null;
+              return (
+                <div
+                  key={`${pOut.id}-${pIn.id}`}
+                  className="bg-slate-800 rounded-lg p-4 border border-slate-700"
+                >
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-red-600/20 text-red-400 border border-red-500/30">
+                      SELL
+                    </span>
+                    <span className="text-slate-50 font-medium">{pOut.name}</span>
+                    <span className="text-slate-500 text-sm">({pOut.team})</span>
+                    <span className="text-slate-500 text-sm">{pOut.position}</span>
+                    <span className="text-slate-400 text-sm">£{pOut.selling_price.toFixed(1)}m</span>
+                    <span className="text-slate-500 text-sm">{pOut.xP.toFixed(1)} xP</span>
+
+                    <span className="text-slate-600 mx-1">→</span>
+
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-600/20 text-emerald-400 border border-emerald-500/30">
+                      BUY
+                    </span>
+                    <span className="text-slate-50 font-medium">{pIn.name}</span>
+                    <span className="text-slate-500 text-sm">({pIn.team})</span>
+                    <span className="text-slate-500 text-sm">{pIn.position}</span>
+                    <span className="text-slate-400 text-sm">£{pIn.now_cost.toFixed(1)}m</span>
+                    <span className="text-emerald-400 text-sm font-semibold">{pIn.xP.toFixed(1)} xP</span>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-sm mt-3">
+                    <span className="text-emerald-400 font-semibold">
+                      +{(pIn.xP - pOut.xP).toFixed(1)} xPts gain
+                    </span>
+                    {pIn.now_cost > pOut.selling_price ? (
+                      <span className="text-amber-400">
+                        -£{(pIn.now_cost - pOut.selling_price).toFixed(1)}m extra
+                      </span>
+                    ) : pIn.now_cost < pOut.selling_price ? (
+                      <span className="text-emerald-400">
+                        +£{(pOut.selling_price - pIn.now_cost).toFixed(1)}m saved
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Budget summary */}
+            <div className="flex gap-4 text-sm text-slate-400 pt-2">
+              <span>Budget: £{data.milpOptimization.budget_available.toFixed(1)}m</span>
+              <span>Spent: £{data.milpOptimization.budget_used.toFixed(1)}m</span>
+              <span className="text-slate-50 font-medium">
+                Remaining: £{(data.milpOptimization.budget_available - data.milpOptimization.budget_used).toFixed(1)}m
+              </span>
+            </div>
+
+            {/* Optimized lineup preview */}
+            {data.milpOptimization.captain && (
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50 mt-2">
+                <div className="text-xs text-slate-400 uppercase tracking-wider mb-2">Optimized XI Captain</div>
+                <span className="text-slate-50 font-semibold">
+                  {data.milpOptimization.captain.name}
+                </span>
+                <span className="text-slate-400 ml-2 text-sm">
+                  ({data.milpOptimization.captain.team}) — {data.milpOptimization.captain.xP.toFixed(1)} xP × 2
+                </span>
+              </div>
+            )}
+          </div>
         )}
       </section>
 
@@ -770,16 +729,6 @@ function DashboardInner() {
   );
 }
 
-// ---------- Tag Badge Component ----------
-
-function TagBadge({ tag }: { tag: PlayerTag }) {
-  return (
-    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${tag.bgColor}`}>
-      {tag.emoji} {tag.label}
-    </span>
-  );
-}
-
 // ---------- Stat Card Component ----------
 
 function StatCard({
@@ -817,17 +766,3 @@ function formatRank(rank: number): string {
   return rank.toLocaleString();
 }
 
-function positionLabel(elementType: number): string {
-  switch (elementType) {
-    case 1:
-      return "GKP";
-    case 2:
-      return "DEF";
-    case 3:
-      return "MID";
-    case 4:
-      return "FWD";
-    default:
-      return "???";
-  }
-}
