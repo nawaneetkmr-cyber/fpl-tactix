@@ -38,15 +38,33 @@ interface EnrichedPick {
   isFinished: boolean;
 }
 
-interface OptimizationResult {
-  optimizedPoints: number;
-  actualPoints: number;
-  pointsLeftOnTable: number;
-  bestCaptainId: number | null;
-  bestCaptainPoints: number;
-  actualCaptainId: number | null;
-  actualCaptainPoints: number;
-  changes: string[];
+interface MilpPlayer {
+  id: number;
+  name: string;
+  team: string;
+  position: string;
+  now_cost: number;
+  selling_price: number;
+  xP: number;
+  ownership_percent: number;
+}
+
+interface MilpOptimization {
+  status: string;
+  transfers_in: MilpPlayer[];
+  transfers_out: MilpPlayer[];
+  starters: MilpPlayer[];
+  bench: MilpPlayer[];
+  captain: MilpPlayer | null;
+  total_xp: number;
+  hit_cost: number;
+  net_xp: number;
+  current_team_xp: number;
+  net_improvement: number;
+  budget_used: number;
+  budget_available: number;
+  should_roll: boolean;
+  safety_score: number;
 }
 
 interface DashboardData {
@@ -58,11 +76,10 @@ interface DashboardData {
   captainPoints: number;
   bestCaptain: { id: number | null; points: number };
   estimatedLiveRank: number;
-  estimatedOptimizedRank: number;
   averageScore: number;
   totalPlayers: number;
   prevOverallRank: number | null;
-  optimization: OptimizationResult;
+  milpOptimization: MilpOptimization | null;
   picks: EnrichedPick[];
   elements: { id: number; web_name: string; team: number; element_type: number }[];
   teams: { id: number; name: string; shortName: string }[];
