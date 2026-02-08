@@ -523,7 +523,14 @@ function DashboardInner() {
         </p>
 
         {!data.milpOptimization ? (
-          <p className="text-slate-500 py-4">Optimizer loading or unavailable...</p>
+          <p className="text-slate-500 py-4">Optimizer not available for this gameweek.</p>
+        ) : (data.milpOptimization as unknown as Record<string, unknown>).error ? (
+          <div className="bg-red-900/20 rounded-lg p-4 border border-red-700/40">
+            <p className="text-red-400 font-medium">Solver error</p>
+            <p className="text-red-300/70 text-xs mt-1 font-mono break-all">
+              {String((data.milpOptimization as unknown as Record<string, unknown>).error)}
+            </p>
+          </div>
         ) : data.milpOptimization.status !== "Optimal" ? (
           <p className="text-red-400 py-4">Solver status: {data.milpOptimization.status}</p>
         ) : data.milpOptimization.transfers_in.length === 0 ? (

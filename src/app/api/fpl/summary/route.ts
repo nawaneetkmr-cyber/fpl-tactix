@@ -20,6 +20,10 @@ import {
 import { calculatePlayerProjections } from "@/lib/xpts";
 import type { FullElement, TeamStrength, FixtureDetail } from "@/lib/xpts";
 
+// Force Node.js runtime (required for child_process.execSync)
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 // Position mapping: FPL element_type (1-4) → optimizer position string
 const ELEMENT_TYPE_TO_POS: Record<number, string> = {
   1: "GK",
@@ -247,26 +251,44 @@ export async function GET(req: Request) {
       });
 
       // Execute the Python optimizer as a subprocess
-      const scriptPath = path.resolve(process.cwd(), "brain/optimizer.py");
+      // Use process.cwd() (Next.js project root) to resolve the script path
+      const cwd = process.cwd();
+      const scriptPath = path.join(cwd, "brain", "optimizer.py");
       const result = execSync(`python3 "${scriptPath}" --json`, {
         input: solverInput,
         encoding: "utf-8",
         timeout: 15000, // 15s max
         maxBuffer: 1024 * 1024, // 1MB
+        cwd, // ensure cwd is correct
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
       });
 
-      const parsed = JSON.parse(result.trim());
-      if (parsed.error) {
-        console.error("[MILP] Solver error:", parsed.error);
+      const trimmed = result.trim();
+      if (!trimmed) {
+        console.error("[MILP] Empty output from solver");
       } else {
-        milpOptimization = parsed;
+        const parsed = JSON.parse(trimmed);
+        if (parsed.error) {
+          console.error("[MILP] Solver error:", parsed.error);
+        } else {
+          milpOptimization = parsed;
+        }
       }
-    } catch (milpErr) {
-      // Log but don't crash the entire response — the optimizer is non-critical
+    } catch (milpErr: unknown) {
+      // Log the full error including stderr for debugging
+      const err = milpErr as { stderr?: string; stdout?: string; message?: string };
       console.error(
         "[MILP] Subprocess failed:",
-        milpErr instanceof Error ? milpErr.message : String(milpErr)
+        err.message || String(milpErr),
+        "\nstderr:", err.stderr || "(none)",
+        "\nstdout:", err.stdout || "(none)"
       );
+      // Surface error to frontend for debugging
+      milpOptimization = {
+        error: err.message || String(milpErr),
+        stderr: err.stderr || null,
+      };
     }
 
     return Response.json({
