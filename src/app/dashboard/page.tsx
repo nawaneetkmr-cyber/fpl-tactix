@@ -3,13 +3,15 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import FixtureDifficultyGrid from "@/components/FixtureDifficultyGrid";
+import PitchView from "@/components/PitchView";
 import {
   buildFixtureDifficultyGrid,
   suggestNextGWCaptain,
   FPLFixture,
   FixtureDifficultyRow,
 } from "@/lib/projections";
-import type { FullElement, TeamStrength } from "@/lib/xpts";
+import { calculatePlayerProjections } from "@/lib/xpts";
+import type { FullElement, TeamStrength, FixtureDetail, PlayerProjection } from "@/lib/xpts";
 
 // ---------- Types ----------
 
@@ -26,14 +28,6 @@ interface EnrichedPick {
   minutes: number;
   isPlaying: boolean;
   isFinished: boolean;
-}
-
-interface RawPick {
-  element: number;
-  position: number;
-  multiplier: number;
-  is_captain: boolean;
-  is_vice_captain: boolean;
 }
 
 interface OptimizationResult {
@@ -62,37 +56,28 @@ interface DashboardData {
   prevOverallRank: number | null;
   optimization: OptimizationResult;
   picks: EnrichedPick[];
-  rawPicks: RawPick[];
-  liveElements: { id: number; stats: { total_points: number; minutes: number } }[];
   elements: { id: number; web_name: string; team: number; element_type: number }[];
   teams: { id: number; name: string; shortName: string }[];
   error?: string;
 }
 
-// ---------- Team Colors ----------
+interface BootstrapElement {
+  id: number;
+  web_name: string;
+  team: number;
+  element_type: number;
+  selected_by_percent: string;
+  form: string;
+  photo: string;
+  now_cost: number;
+}
 
-const TEAM_COLORS: Record<number, string> = {
-  1: "#EF0107", // Arsenal
-  2: "#95BFE5", // Aston Villa
-  3: "#DA291C", // Bournemouth
-  4: "#0057B8", // Brighton
-  5: "#6C1D45", // Burnley
-  6: "#034694", // Chelsea
-  7: "#1B458F", // Crystal Palace
-  8: "#003399", // Everton
-  9: "#FFFFFF", // Fulham
-  10: "#C8102E", // Ipswich
-  11: "#003090", // Leicester
-  12: "#C8102E", // Liverpool
-  13: "#6CABDD", // Man City
-  14: "#DA291C", // Man Utd
-  15: "#241F20", // Newcastle
-  16: "#E53233", // Nottm Forest
-  17: "#EE2737", // Southampton
-  18: "#132257", // Spurs
-  19: "#1C2D3E", // West Ham
-  20: "#FDB913", // Wolves
-};
+interface BootstrapTeam {
+  id: number;
+  name: string;
+  short_name: string;
+  code: number;
+}
 
 // ---------- Main Dashboard Wrapper ----------
 
@@ -100,8 +85,8 @@ export default function DashboardPage() {
   return (
     <Suspense
       fallback={
-        <div style={{ padding: 40, textAlign: "center" }}>
-          <div className="spinner" style={{ margin: "0 auto" }} />
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="spinner" />
         </div>
       }
     >
@@ -121,13 +106,21 @@ function DashboardInner() {
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  // Fixture data state
+  // Bootstrap data for pitch and projections
+  const [bootstrapElements, setBootstrapElements] = useState<BootstrapElement[]>([]);
+  const [bootstrapTeams, setBootstrapTeams] = useState<BootstrapTeam[]>([]);
+  const [fixtures, setFixtures] = useState<FixtureDetail[]>([]);
   const [fixtureRows, setFixtureRows] = useState<FixtureDifficultyRow[]>([]);
   const [fixturesLoading, setFixturesLoading] = useState(true);
+
+  // Captain suggestions
   const [captainSuggestions, setCaptainSuggestions] = useState<
     { element: number; webName: string; xPts: number; fixtureLabel: string }[]
   >([]);
   const [captainGW, setCaptainGW] = useState<number | null>(null);
+
+  // Transfer targets
+  const [transferTargets, setTransferTargets] = useState<PlayerProjection[]>([]);
 
   const fetchData = useCallback(async (id: string) => {
     if (!id) return;
@@ -159,7 +152,7 @@ function DashboardInner() {
     return () => clearInterval(interval);
   }, [teamId, fetchData]);
 
-  // Fetch fixture data
+  // Fetch bootstrap/fixture data
   useEffect(() => {
     if (!data || data.error) return;
 
@@ -179,7 +172,24 @@ function DashboardInner() {
           return;
         }
 
-        const fixtures: FPLFixture[] = bootstrap.fixtures || [];
+        // Store bootstrap data
+        setBootstrapElements(bootstrap.elements || []);
+        setBootstrapTeams(bootstrap.teams || []);
+
+        const fixtureData: FixtureDetail[] = (bootstrap.fixtures || []).map(
+          (f: FPLFixture) => ({
+            id: f.id,
+            event: f.event,
+            team_h: f.team_h,
+            team_a: f.team_a,
+            team_h_difficulty: f.team_h_difficulty,
+            team_a_difficulty: f.team_a_difficulty,
+            finished: f.finished,
+            started: f.started,
+          })
+        );
+        setFixtures(fixtureData);
+
         const teams: TeamStrength[] = (bootstrap.teams || []).map(
           (t: {
             id: number;
@@ -203,13 +213,24 @@ function DashboardInner() {
             strength_overall_away: t.strength_overall_away,
           })
         );
+
         const currentGW = bootstrap.currentGW || gameweek;
 
-        // Build fixture difficulty grid
-        const rows = buildFixtureDifficultyGrid(fixtures, teams, currentGW, 10);
+        // Build fixture difficulty grid (for FPLFixture type)
+        const fplFixtures: FPLFixture[] = (bootstrap.fixtures || []).map(
+          (f: FPLFixture) => f
+        );
+        const fplTeams = (bootstrap.teams || []).map(
+          (t: { id: number; name: string; short_name: string }) => ({
+            id: t.id,
+            name: t.name,
+            short_name: t.short_name,
+          })
+        );
+        const rows = buildFixtureDifficultyGrid(fplFixtures, fplTeams, currentGW, 10);
         setFixtureRows(rows);
 
-        // Build captain suggestions
+        // Captain suggestions
         const squadIds = picks.map((p) => p.element);
         const allPlayers: FullElement[] = (bootstrap.elements || []).map(
           (e: FullElement) => ({
@@ -246,12 +267,25 @@ function DashboardInner() {
         const { suggestions, nextGW } = suggestNextGWCaptain(
           squadIds,
           allPlayers,
-          fixtures,
+          fixtureData,
           teams,
           currentGW
         );
         setCaptainSuggestions(suggestions);
         setCaptainGW(nextGW);
+
+        // Calculate transfer targets (players NOT in squad, sorted by xPts)
+        const allProjections = calculatePlayerProjections(
+          allPlayers,
+          teams,
+          fixtureData,
+          nextGW
+        );
+        const nonSquadTargets = allProjections
+          .filter((p) => !squadIds.includes(p.player_id))
+          .filter((p) => p.minutes_probability >= 0.6) // Only likely starters
+          .slice(0, 5);
+        setTransferTargets(nonSquadTargets);
       } catch {
         // Silent fail
       }
@@ -272,72 +306,56 @@ function DashboardInner() {
     }
   }
 
-  // No team ID entered yet - show prominent input
+  // No team ID - show input
   if (!teamId) {
     return (
-      <div
-        style={{
-          minHeight: "60vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 40,
-        }}
-      >
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
-          FPL Tactix
-        </h1>
-        <p style={{ color: "var(--muted)", marginBottom: 32, textAlign: "center" }}>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
+        <h1 className="text-3xl font-bold mb-2">FPL Tactix</h1>
+        <p className="text-gray-400 mb-8 text-center">
           Enter your FPL Team ID to view your dashboard
         </p>
-        <form
-          onSubmit={handleSubmit}
-          style={{ display: "flex", gap: 12, width: "100%", maxWidth: 320 }}
-        >
+        <form onSubmit={handleSubmit} className="flex gap-3 w-full max-w-sm">
           <input
             type="text"
             inputMode="numeric"
             placeholder="Team ID (e.g. 123456)"
             value={inputId}
             onChange={(e) => setInputId(e.target.value)}
-            style={{
-              flex: 1,
-              padding: "14px 18px",
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid var(--card-border)",
-              background: "var(--card)",
-              color: "var(--foreground)",
-            }}
+            className="flex-1 px-4 py-3 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
           />
-          <button type="submit" className="btn-primary" style={{ padding: "14px 24px" }}>
+          <button
+            type="submit"
+            className="px-6 py-3 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-500 transition-colors"
+          >
             Go
           </button>
         </form>
-        <p style={{ color: "var(--muted-light)", fontSize: 12, marginTop: 16 }}>
+        <p className="text-gray-500 text-sm mt-4">
           Find your Team ID in the FPL app under Points → URL
         </p>
       </div>
     );
   }
 
+  // Loading state
   if (loading && !data) {
     return (
-      <div style={{ padding: 40, textAlign: "center" }}>
-        <div className="spinner" style={{ margin: "0 auto 16px" }} />
-        <p style={{ color: "var(--muted)" }}>Loading live data...</p>
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="spinner mb-4" />
+        <p className="text-gray-400">Loading live data...</p>
       </div>
     );
   }
 
+  // Error state
   if (data?.error) {
     return (
-      <div style={{ padding: 40, textAlign: "center" }}>
-        <p style={{ color: "var(--danger)", marginBottom: 16 }}>
-          Error: {data.error}
-        </p>
-        <button className="btn-secondary" onClick={() => fetchData(teamId)}>
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <p className="text-red-400 mb-4">Error: {data.error}</p>
+        <button
+          onClick={() => fetchData(teamId)}
+          className="px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600"
+        >
           Retry
         </button>
       </div>
@@ -346,298 +364,247 @@ function DashboardInner() {
 
   if (!data) return null;
 
-  // Prepare data for pitch visualization
-  const starters = data.picks.filter((p) => p.position <= 11);
-  const bench = data.picks.filter((p) => p.position > 11);
-  const gkp = starters.filter((p) => p.elementType === 1);
-  const def = starters.filter((p) => p.elementType === 2);
-  const mid = starters.filter((p) => p.elementType === 3);
-  const fwd = starters.filter((p) => p.elementType === 4);
-
+  // Calculate stats
   const rankChange = data.prevOverallRank
     ? data.prevOverallRank - data.estimatedLiveRank
     : null;
-  const rankChangePercent = data.prevOverallRank
-    ? ((rankChange! / data.prevOverallRank) * 100).toFixed(1)
-    : null;
+  const rankChangePercent =
+    data.prevOverallRank && rankChange
+      ? ((rankChange / data.prevOverallRank) * 100).toFixed(1)
+      : null;
+  const safetyPercentile =
+    data.totalPlayers > 0
+      ? ((1 - data.estimatedLiveRank / data.totalPlayers) * 100).toFixed(1)
+      : null;
 
   const squadTeamIds = [...new Set(data.picks.map((p) => p.teamId))];
 
+  // Build team map for transfer targets
+  const teamMap = new Map(bootstrapTeams.map((t) => [t.id, t]));
+  const elementMap = new Map(bootstrapElements.map((e) => [e.id, e]));
+
   return (
-    <div
-      style={{ maxWidth: 900, margin: "0 auto", padding: "20px 16px" }}
-      className="fade-in"
-    >
-      {/* ===== HEADER SECTION ===== */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          flexWrap: "wrap",
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-            {data.teamName}
-          </h1>
-          <p style={{ color: "var(--muted)", fontSize: 14 }}>
-            {data.playerName} &middot; Gameweek {data.gameweek}
-          </p>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {loading && <div className="spinner" style={{ width: 16, height: 16 }} />}
-          <span className="badge badge-playing live-pulse">LIVE</span>
-          {lastUpdate && (
-            <span style={{ fontSize: 11, color: "var(--muted-light)" }}>
-              {lastUpdate.toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ===== SECTION 1: PITCH VISUALIZATION (Hero) ===== */}
-      <div className="pitch" style={{ marginBottom: 24, paddingBottom: 24 }}>
-        <div
-          style={{
-            position: "relative",
-            zIndex: 1,
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-            alignItems: "center",
-          }}
-        >
-          <PitchRow players={fwd} />
-          <PitchRow players={mid} />
-          <PitchRow players={def} />
-          <PitchRow players={gkp} />
-        </div>
-      </div>
-
-      {/* Bench */}
-      <div
-        className="card"
-        style={{
-          background: "var(--bench-bg)",
-          marginBottom: 24,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--muted)",
-            marginBottom: 10,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-          }}
-        >
-          Bench
-        </div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-around",
-            gap: 8,
-          }}
-        >
-          {bench.map((p) => (
-            <div key={p.element} className="player-card">
-              <div
-                className="player-shirt"
-                style={{
-                  background: TEAM_COLORS[p.teamId] || "#666",
-                  opacity: 0.6,
-                }}
-              >
-                {positionShort(p.elementType)}
-              </div>
-              <div className="player-name" style={{ color: "var(--muted-light)" }}>
-                {p.webName}
-              </div>
-              <div className="player-points">{p.points}</div>
+    <div className="max-w-5xl mx-auto px-4 py-6 space-y-8">
+      {/* ===== HEADER ===== */}
+      <header className="sticky top-0 z-20 -mx-4 px-4 py-4 bg-gray-900/95 backdrop-blur border-b border-gray-800">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">{data.teamName}</h1>
+            <p className="text-gray-400 text-sm">{data.playerName}</p>
+          </div>
+          <div className="flex items-center gap-6 text-sm">
+            <div className="text-center">
+              <div className="text-gray-400">GW{data.gameweek}</div>
+              <div className="text-xl font-bold text-green-400">{data.livePoints}</div>
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ===== SECTION 2: QUICK STATS (4 horizontal cards) ===== */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
-        <StatCard label="GW Live Points" value={data.livePoints} accent />
-        <StatCard
-          label="GW Average"
-          value={data.averageScore}
-          sublabel={
-            data.livePoints >= data.averageScore
-              ? `+${data.livePoints - data.averageScore} above`
-              : `${data.livePoints - data.averageScore} below`
-          }
-        />
-        <StatCard
-          label="Est. Live Rank"
-          value={formatRank(data.estimatedLiveRank)}
-        />
-        <StatCard
-          label="Rank Change"
-          value={rankChange !== null ? (rankChange > 0 ? `+${formatRank(rankChange)}` : formatRank(rankChange)) : "-"}
-          sublabel={rankChangePercent ? `${rankChange! > 0 ? "+" : ""}${rankChangePercent}%` : undefined}
-        />
-      </div>
-
-      {/* ===== SECTION 3: TWO-COLUMN INSIGHTS ===== */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-          marginBottom: 24,
-        }}
-      >
-        {/* Points Left on Table */}
-        <div
-          className="card"
-          style={{
-            background:
-              data.optimization.pointsLeftOnTable > 0
-                ? "linear-gradient(135deg, rgba(245,158,11,0.08), rgba(239,68,68,0.08))"
-                : undefined,
-          }}
-        >
-          <div className="stat-label">Points Left on Table</div>
-          <div
-            style={{
-              fontSize: 36,
-              fontWeight: 700,
-              marginTop: 8,
-              color:
-                data.optimization.pointsLeftOnTable > 10
-                  ? "var(--danger)"
-                  : data.optimization.pointsLeftOnTable > 0
-                    ? "var(--warning)"
-                    : "var(--success)",
-            }}
-          >
-            {data.optimization.pointsLeftOnTable}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>
-            {data.optimization.pointsLeftOnTable === 0
-              ? "Perfect decisions!"
-              : data.optimization.pointsLeftOnTable <= 5
-                ? "Minor optimization missed"
-                : "Room for improvement"}
-          </div>
-          {data.optimization.changes.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              {data.optimization.changes.slice(0, 2).map((change, i) => (
+            <div className="text-center">
+              <div className="text-gray-400">Rank</div>
+              <div className="text-xl font-bold">{formatRank(data.estimatedLiveRank)}</div>
+            </div>
+            {rankChange !== null && (
+              <div className="text-center">
+                <div className="text-gray-400">Change</div>
                 <div
-                  key={i}
-                  style={{
-                    fontSize: 11,
-                    color: "var(--muted)",
-                    padding: "4px 0",
-                    borderTop: i > 0 ? "1px solid var(--card-border)" : undefined,
-                  }}
+                  className={`text-lg font-semibold ${
+                    rankChange > 0 ? "text-green-400" : rankChange < 0 ? "text-red-400" : "text-gray-400"
+                  }`}
                 >
-                  {change}
+                  {rankChange > 0 ? "+" : ""}
+                  {formatRank(rankChange)}
                 </div>
-              ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              {loading && <div className="spinner w-4 h-4" />}
+              <span className="px-2 py-1 rounded text-xs font-semibold bg-green-600 text-white animate-pulse">
+                LIVE
+              </span>
+              {lastUpdate && (
+                <span className="text-gray-500 text-xs">
+                  {lastUpdate.toLocaleTimeString()}
+                </span>
+              )}
             </div>
-          )}
-        </div>
-
-        {/* Captain Suggestions */}
-        <div className="card">
-          <div className="stat-label">
-            Captain Pick (GW{captainGW ?? data.gameweek})
           </div>
-          {fixturesLoading ? (
-            <div style={{ padding: 20, textAlign: "center" }}>
-              <div className="spinner" style={{ margin: "0 auto" }} />
-            </div>
-          ) : captainSuggestions.length > 0 ? (
-            <div style={{ marginTop: 12 }}>
-              {captainSuggestions.map((s, idx) => (
-                <div
-                  key={s.element}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "8px 0",
-                    borderTop: idx > 0 ? "1px solid var(--card-border)" : undefined,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span
-                      style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        background:
-                          idx === 0 ? "var(--accent)" : idx === 1 ? "#C0C0C0" : "#CD7F32",
-                        color: idx === 0 ? "#000" : "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 10,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {idx + 1}
-                    </span>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{s.webName}</div>
-                      <div style={{ fontSize: 10, color: "var(--muted)" }}>
-                        {s.fixtureLabel}
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      fontSize: 14,
-                      color: idx === 0 ? "var(--accent-dark)" : "inherit",
-                    }}
-                  >
-                    {s.xPts.toFixed(1)} xPts
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>
-              No suggestions available
-            </div>
-          )}
         </div>
-      </div>
+      </header>
 
-      {/* ===== SECTION 4: FIXTURE DIFFICULTY GRID ===== */}
-      <div className="card">
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--muted)",
-            marginBottom: 16,
-          }}
-        >
-          FIXTURE DIFFICULTY (NEXT 10 GWs)
+      {/* ===== SECTION 1: PITCH VISUALIZATION ===== */}
+      <section>
+        <PitchView
+          picks={data.picks}
+          elements={bootstrapElements.map((e) => ({
+            id: e.id,
+            web_name: e.web_name,
+            team: e.team,
+            element_type: e.element_type,
+            selected_by_percent: e.selected_by_percent,
+            form: e.form,
+            photo: e.photo || "",
+          }))}
+          teams={bootstrapTeams.map((t) => ({
+            id: t.id,
+            name: t.name,
+            short_name: t.short_name,
+            code: t.code,
+          }))}
+        />
+      </section>
+
+      {/* ===== SECTION 2: QUICK STATS ===== */}
+      <section>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            label="GW Live Points"
+            value={data.livePoints}
+            sublabel={
+              data.livePoints >= data.averageScore
+                ? `+${data.livePoints - data.averageScore} above avg`
+                : `${data.livePoints - data.averageScore} below avg`
+            }
+            accent={data.livePoints >= data.averageScore}
+          />
+          <StatCard
+            label="GW Average"
+            value={data.averageScore}
+          />
+          <StatCard
+            label="Overall Rank"
+            value={formatRank(data.estimatedLiveRank)}
+            sublabel={
+              rankChangePercent
+                ? `${rankChange! > 0 ? "+" : ""}${rankChangePercent}%`
+                : undefined
+            }
+          />
+          <StatCard
+            label="Safety Score"
+            value={safetyPercentile ? `Top ${safetyPercentile}%` : "-"}
+            sublabel="Percentile"
+          />
         </div>
+      </section>
+
+      {/* ===== SECTION 3: TRANSFER OPPORTUNITIES ===== */}
+      <section>
+        <h2 className="text-lg font-bold mb-4 pb-2 border-b border-gray-700">
+          Best Transfer Targets (Next 3 GW)
+        </h2>
         {fixturesLoading ? (
-          <div style={{ padding: 40, textAlign: "center" }}>
-            <div className="spinner" style={{ margin: "0 auto 16px" }} />
-            <p style={{ color: "var(--muted)" }}>Loading fixtures...</p>
+          <div className="flex justify-center py-8">
+            <div className="spinner" />
+          </div>
+        ) : transferTargets.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-gray-400 text-left">
+                  <th className="pb-3 font-medium">Player</th>
+                  <th className="pb-3 font-medium">Pos</th>
+                  <th className="pb-3 font-medium">Team</th>
+                  <th className="pb-3 font-medium text-right">Price</th>
+                  <th className="pb-3 font-medium text-right">xPts</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transferTargets.map((target) => {
+                  const team = teamMap.get(target.team_id);
+                  const element = elementMap.get(target.player_id);
+                  return (
+                    <tr
+                      key={target.player_id}
+                      className="border-t border-gray-800 hover:bg-gray-800/50"
+                    >
+                      <td className="py-3 font-medium">{target.web_name}</td>
+                      <td className="py-3 text-gray-400">
+                        {positionLabel(target.position)}
+                      </td>
+                      <td className="py-3 text-gray-400">{team?.short_name ?? "-"}</td>
+                      <td className="py-3 text-right">
+                        £{element ? (element.now_cost / 10).toFixed(1) : "-"}m
+                      </td>
+                      <td className="py-3 text-right font-semibold text-green-400">
+                        {target.expected_points.toFixed(1)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-gray-500 py-4">No transfer suggestions available</p>
+        )}
+      </section>
+
+      {/* ===== SECTION 4: CAPTAIN PICK ===== */}
+      <section>
+        <h2 className="text-lg font-bold mb-4 pb-2 border-b border-gray-700">
+          Captain Pick (GW{captainGW ?? data.gameweek})
+        </h2>
+        {fixturesLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="spinner" />
+          </div>
+        ) : captainSuggestions.length > 0 ? (
+          <div className="space-y-3">
+            {captainSuggestions.map((s, idx) => (
+              <div
+                key={s.element}
+                className={`flex items-center justify-between p-4 rounded-lg ${
+                  idx === 0
+                    ? "bg-gradient-to-r from-green-900/30 to-green-800/10 border border-green-700"
+                    : "bg-gray-800/50"
+                }`}
+              >
+                <div className="flex items-center gap-4">
+                  <span
+                    className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
+                      idx === 0
+                        ? "bg-green-500 text-black"
+                        : idx === 1
+                          ? "bg-gray-400 text-black"
+                          : "bg-amber-700 text-white"
+                    }`}
+                  >
+                    {idx + 1}
+                  </span>
+                  <div>
+                    <div className="font-semibold">{s.webName}</div>
+                    <div className="text-sm text-gray-400">{s.fixtureLabel}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div
+                    className={`text-xl font-bold ${
+                      idx === 0 ? "text-green-400" : "text-white"
+                    }`}
+                  >
+                    {s.xPts.toFixed(1)}
+                  </div>
+                  <div className="text-xs text-gray-500">xPts</div>
+                </div>
+                {idx === 0 && (
+                  <span className="ml-4 px-2 py-1 rounded text-xs font-semibold bg-green-600 text-white">
+                    Best Pick
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500 py-4">No captain suggestions available</p>
+        )}
+      </section>
+
+      {/* ===== SECTION 5: FIXTURE DIFFICULTY GRID ===== */}
+      <section>
+        <h2 className="text-lg font-bold mb-4 pb-2 border-b border-gray-700">
+          Fixture Difficulty (Next 10 GWs)
+        </h2>
+        {fixturesLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="spinner" />
           </div>
         ) : fixtureRows.length > 0 ? (
           <FixtureDifficultyGrid
@@ -647,52 +614,9 @@ function DashboardInner() {
             highlightTeamIds={squadTeamIds}
           />
         ) : (
-          <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
-            Unable to load fixture data
-          </div>
+          <p className="text-gray-500 py-4">Unable to load fixture data</p>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ---------- Pitch Row Component ----------
-
-function PitchRow({ players }: { players: EnrichedPick[] }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-around",
-        width: "100%",
-        gap: 4,
-      }}
-    >
-      {players.map((p) => (
-        <div key={p.element} className="player-card">
-          <div
-            className="player-shirt"
-            style={{
-              background: TEAM_COLORS[p.teamId] || "#666",
-              border: p.minutes > 0 ? "2px solid var(--accent)" : "2px solid transparent",
-            }}
-          >
-            {p.isCaptain ? "C" : p.isViceCaptain ? "V" : positionShort(p.elementType)}
-          </div>
-          <div className="player-name">{p.webName}</div>
-          <div className="player-points">{p.points * (p.multiplier || 1)}</div>
-          {p.isCaptain && (
-            <span className="badge badge-captain" style={{ fontSize: 9, padding: "1px 4px" }}>
-              C
-            </span>
-          )}
-          {p.isViceCaptain && (
-            <span className="badge badge-vice" style={{ fontSize: 9, padding: "1px 4px" }}>
-              V
-            </span>
-          )}
-        </div>
-      ))}
+      </section>
     </div>
   );
 }
@@ -711,23 +635,16 @@ function StatCard({
   accent?: boolean;
 }) {
   return (
-    <div className="card" style={{ textAlign: "center", padding: "16px 12px" }}>
-      <div className="stat-label" style={{ fontSize: 11 }}>{label}</div>
+    <div className="p-4 rounded-xl bg-gray-800/50 border border-gray-700">
+      <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">
+        {label}
+      </div>
       <div
-        style={{
-          fontSize: 22,
-          fontWeight: 700,
-          color: accent ? "var(--accent-dark)" : "inherit",
-          marginTop: 4,
-        }}
+        className={`text-2xl font-bold ${accent ? "text-green-400" : "text-white"}`}
       >
         {value}
       </div>
-      {sublabel && (
-        <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-          {sublabel}
-        </div>
-      )}
+      {sublabel && <div className="text-xs text-gray-500 mt-1">{sublabel}</div>}
     </div>
   );
 }
@@ -741,12 +658,17 @@ function formatRank(rank: number): string {
   return rank.toLocaleString();
 }
 
-function positionShort(elementType: number): string {
+function positionLabel(elementType: number): string {
   switch (elementType) {
-    case 1: return "G";
-    case 2: return "D";
-    case 3: return "M";
-    case 4: return "F";
-    default: return "?";
+    case 1:
+      return "GKP";
+    case 2:
+      return "DEF";
+    case 3:
+      return "MID";
+    case 4:
+      return "FWD";
+    default:
+      return "???";
   }
 }

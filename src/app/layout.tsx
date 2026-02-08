@@ -60,28 +60,6 @@ export default function RootLayout({
             >
               Dashboard
             </a>
-            <a
-              href="/leagues"
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                color: "var(--muted)",
-                textDecoration: "none",
-              }}
-            >
-              Leagues
-            </a>
-            <a
-              href="/strategy"
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                color: "var(--muted)",
-                textDecoration: "none",
-              }}
-            >
-              Strategy
-            </a>
           </div>
         </nav>
         {children}
