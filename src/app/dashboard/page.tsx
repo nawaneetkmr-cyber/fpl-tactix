@@ -58,6 +58,14 @@ interface MilpOptimization {
   safety_score: number;
 }
 
+interface SafetyScoreData {
+  safetyScore: number;
+  rankTier: string;
+  tierLabel: string;
+  delta: number;
+  arrow: "green" | "red" | "neutral";
+}
+
 interface DashboardData {
   teamName: string;
   playerName: string;
@@ -71,6 +79,7 @@ interface DashboardData {
   totalPlayers: number;
   prevOverallRank: number | null;
   milpOptimization: MilpOptimization | null;
+  safetyScore?: SafetyScoreData;
   picks: EnrichedPick[];
   elements: { id: number; web_name: string; team: number; element_type: number }[];
   teams: { id: number; name: string; shortName: string }[];
@@ -373,13 +382,13 @@ function DashboardInner() {
       ? ((rankChange / data.prevOverallRank) * 100).toFixed(1)
       : null;
 
-  // Safety score: points threshold from solver (sum of xP * ownership%)
-  // This is the "green arrow line" — score above this to climb rank
-  const safetyScore = data.milpOptimization?.safety_score ?? data.averageScore;
+  // Safety score from EO-weighted live points calculation
+  const safetyData = data.safetyScore;
+  const safetyScore = safetyData?.safetyScore ?? data.averageScore;
   const aboveSafety = data.livePoints >= safetyScore;
-  const safetyDelta = rankChange !== null
-    ? (rankChange > 0 ? "up" : rankChange < 0 ? "down" : "flat")
-    : null;
+  const safetyArrow = safetyData?.arrow ?? (aboveSafety ? "green" : "red");
+  const safetyDelta = safetyData?.delta ?? (data.livePoints - safetyScore);
+  const safetyTierLabel = safetyData?.tierLabel ?? "Overall";
 
   const squadTeamIds = [...new Set(data.picks.map((p) => p.teamId).filter((id) => id > 0))];
 
@@ -477,10 +486,19 @@ function DashboardInner() {
                 : undefined
             }
           />
-          {/* Safety Score: points threshold to stay green */}
-          <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700">
-            <div className="text-sm text-slate-400 uppercase tracking-wider mb-1">
-              Safety Line
+          {/* Safety Score: EO-weighted points threshold for rank bracket */}
+          <div className={`p-4 rounded-xl bg-gradient-to-br border ${
+            aboveSafety
+              ? "from-emerald-950/40 to-slate-800 border-emerald-700/50"
+              : "from-red-950/40 to-slate-800 border-red-700/50"
+          }`}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm text-slate-400 uppercase tracking-wider">
+                Safety Score
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">
+                {safetyTierLabel}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <span className={`text-3xl font-bold ${
@@ -489,20 +507,20 @@ function DashboardInner() {
                 {safetyScore}
               </span>
               <span className="text-xs text-slate-500">pts</span>
-              {safetyDelta === "up" && (
-                <span className="text-emerald-400 text-lg" title="Rank improved this GW">▲</span>
+              {safetyArrow === "green" && (
+                <span className="text-emerald-400 text-lg" title="Above safety — rank rising">▲</span>
               )}
-              {safetyDelta === "down" && (
-                <span className="text-red-400 text-lg" title="Rank declined this GW">▼</span>
+              {safetyArrow === "red" && (
+                <span className="text-red-400 text-lg" title="Below safety — rank falling">▼</span>
               )}
-              {safetyDelta === "flat" && (
-                <span className="text-slate-500 text-lg" title="Unchanged">—</span>
+              {safetyArrow === "neutral" && (
+                <span className="text-slate-500 text-lg" title="On the line">—</span>
               )}
             </div>
             <div className="text-xs text-slate-500 mt-1">
               {aboveSafety
-                ? `You're ${data.livePoints - safetyScore} above — green arrow`
-                : `Need ${safetyScore - data.livePoints} more — red arrow zone`}
+                ? `+${safetyDelta} above — green arrow likely`
+                : `${safetyDelta} below — red arrow zone`}
             </div>
           </div>
         </div>

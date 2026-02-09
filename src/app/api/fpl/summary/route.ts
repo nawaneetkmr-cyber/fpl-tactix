@@ -13,6 +13,8 @@ import {
   getCaptainPoints,
   estimateRank,
   enrichPicks,
+  computeSafetyResult,
+  findMostCaptainedPlayer,
 } from "@/lib/calculations";
 import { calculatePlayerProjections } from "@/lib/xpts";
 import type { FullElement, TeamStrength, FixtureDetail } from "@/lib/xpts";
@@ -239,6 +241,20 @@ export async function GET(req: Request) {
       milpOptimization = { error: message };
     }
 
+    // ──────────────────────────────────────────────────
+    //  Safety Score — EO-weighted live points threshold
+    // ──────────────────────────────────────────────────
+
+    const actualRank = entry?.summary_overall_rank || estimatedLiveRank;
+    const captainIdForSafety = findMostCaptainedPlayer(elements);
+    const safetyResult = computeSafetyResult(
+      livePoints,
+      liveElements,
+      elements,
+      actualRank,
+      captainIdForSafety
+    );
+
     return Response.json({
       teamName: entry.name,
       playerName: `${entry.player_first_name} ${entry.player_last_name}`,
@@ -252,6 +268,7 @@ export async function GET(req: Request) {
       totalPlayers,
       prevOverallRank,
       milpOptimization,
+      safetyScore: safetyResult,
       picks: enrichedPicks,
       rawPicks: picks,
       liveElements,
