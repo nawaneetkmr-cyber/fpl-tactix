@@ -11,7 +11,6 @@ import {
   FixtureDifficultyRow,
 } from "@/lib/projections";
 import type { FullElement, TeamStrength, FixtureDetail } from "@/lib/xpts";
-import { calculateSafetyScore } from "@/lib/advisor";
 
 // ---------- Types ----------
 
@@ -374,8 +373,10 @@ function DashboardInner() {
       ? ((rankChange / data.prevOverallRank) * 100).toFixed(1)
       : null;
 
-  // Safety score: GW-performance based (50 = average, scales by std dev)
-  const safetyScore = calculateSafetyScore(data.livePoints, data.averageScore);
+  // Safety score: points threshold from solver (sum of xP * ownership%)
+  // This is the "green arrow line" — score above this to climb rank
+  const safetyScore = data.milpOptimization?.safety_score ?? data.averageScore;
+  const aboveSafety = data.livePoints >= safetyScore;
   const safetyDelta = rankChange !== null
     ? (rankChange > 0 ? "up" : rankChange < 0 ? "down" : "flat")
     : null;
@@ -476,18 +477,18 @@ function DashboardInner() {
                 : undefined
             }
           />
-          {/* Safety Score: GW performance based */}
+          {/* Safety Score: points threshold to stay green */}
           <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700">
             <div className="text-sm text-slate-400 uppercase tracking-wider mb-1">
-              Safety Score
+              Safety Line
             </div>
             <div className="flex items-center gap-2">
               <span className={`text-3xl font-bold ${
-                safetyScore >= 60 ? "text-emerald-400" : safetyScore >= 40 ? "text-amber-400" : "text-red-400"
+                aboveSafety ? "text-emerald-400" : "text-red-400"
               }`}>
                 {safetyScore}
               </span>
-              <span className="text-xs text-slate-500">/100</span>
+              <span className="text-xs text-slate-500">pts</span>
               {safetyDelta === "up" && (
                 <span className="text-emerald-400 text-lg" title="Rank improved this GW">▲</span>
               )}
@@ -499,15 +500,9 @@ function DashboardInner() {
               )}
             </div>
             <div className="text-xs text-slate-500 mt-1">
-              {data.livePoints >= data.averageScore
-                ? `+${data.livePoints - data.averageScore} vs avg`
-                : `${data.livePoints - data.averageScore} vs avg`}
-              {rankChange !== null && rankChange !== 0 && (
-                <span>
-                  {" · "}
-                  {rankChange > 0 ? "+" : ""}{formatRank(rankChange)} rank
-                </span>
-              )}
+              {aboveSafety
+                ? `You're ${data.livePoints - safetyScore} above — green arrow`
+                : `Need ${safetyScore - data.livePoints} more — red arrow zone`}
             </div>
           </div>
         </div>
@@ -523,7 +518,14 @@ function DashboardInner() {
         </p>
 
         {!data.milpOptimization ? (
-          <p className="text-slate-500 py-4">Optimizer loading or unavailable...</p>
+          <p className="text-slate-500 py-4">Optimizer not available for this gameweek.</p>
+        ) : (data.milpOptimization as unknown as Record<string, unknown>).error ? (
+          <div className="bg-red-900/20 rounded-lg p-4 border border-red-700/40">
+            <p className="text-red-400 font-medium">Solver error</p>
+            <p className="text-red-300/70 text-xs mt-1 font-mono break-all">
+              {String((data.milpOptimization as unknown as Record<string, unknown>).error)}
+            </p>
+          </div>
         ) : data.milpOptimization.status !== "Optimal" ? (
           <p className="text-red-400 py-4">Solver status: {data.milpOptimization.status}</p>
         ) : data.milpOptimization.transfers_in.length === 0 ? (

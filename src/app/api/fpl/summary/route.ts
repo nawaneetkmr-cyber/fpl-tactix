@@ -1,6 +1,3 @@
-import { execSync } from "child_process";
-import path from "path";
-
 import {
   fetchBootstrap,
   fetchLiveGW,
@@ -19,6 +16,10 @@ import {
 } from "@/lib/calculations";
 import { calculatePlayerProjections } from "@/lib/xpts";
 import type { FullElement, TeamStrength, FixtureDetail } from "@/lib/xpts";
+import { solveFplTransfers } from "@/lib/solver";
+import type { SolverPlayer } from "@/lib/solver";
+
+export const dynamic = "force-dynamic";
 
 // Position mapping: FPL element_type (1-4) → optimizer position string
 const ELEMENT_TYPE_TO_POS: Record<number, string> = {
@@ -123,7 +124,7 @@ export async function GET(req: Request) {
     );
 
     // ──────────────────────────────────────────────────
-    //  MILP OPTIMIZER — Python subprocess integration
+    //  Transfer Optimizer — TypeScript solver
     // ──────────────────────────────────────────────────
 
     let milpOptimization = null;
@@ -158,7 +159,6 @@ export async function GET(req: Request) {
       const bank = (picksData.entry_history?.bank ?? 0) / 10;
 
       // Estimate free transfers from history
-      // FPL rule: start with 1 FT, if 0 transfers made last GW → bank 1 (max 2)
       let freeTransfers = 1;
       if (latestHistory && latestHistory.length >= 2) {
         const sorted = [...latestHistory].sort(
@@ -173,18 +173,7 @@ export async function GET(req: Request) {
       }
 
       // Build player pool for the solver
-      const playerPool: Array<{
-        id: number;
-        name: string;
-        team: string;
-        position: string;
-        now_cost: number;
-        selling_price: number;
-        xP: number;
-        ownership_percent: number;
-        in_current_squad: boolean;
-        is_current_starter: boolean;
-      }> = [];
+      const playerPool: SolverPlayer[] = [];
 
       // Add current squad (15 players)
       for (const el of elements as FullElement[]) {
@@ -200,8 +189,8 @@ export async function GET(req: Request) {
           name: el.web_name,
           team: teamShortNames[el.team] ?? `T${el.team}`,
           position: pos,
-          now_cost: el.now_cost / 10, // 0.1m → £m
-          selling_price: el.now_cost / 10, // approximation (no purchase price available)
+          now_cost: el.now_cost / 10,
+          selling_price: el.now_cost / 10,
           xP: proj?.expected_points ?? 0,
           ownership_percent: parseFloat(el.selected_by_percent || "0"),
           in_current_squad: true,
@@ -214,7 +203,6 @@ export async function GET(req: Request) {
         .filter((p) => !squadIds.has(p.player_id) && p.expected_points > 1.0)
         .sort((a, b) => b.expected_points - a.expected_points);
 
-      // Pick top targets per position to keep pool manageable
       const targetCounts: Record<string, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
       const MAX_TARGETS_PER_POS = 10;
 
@@ -239,34 +227,16 @@ export async function GET(req: Request) {
         });
       }
 
-      // Build JSON input for the Python solver
-      const solverInput = JSON.stringify({
+      // Run the TypeScript solver
+      milpOptimization = solveFplTransfers({
         players: playerPool,
         bank,
         free_transfers: freeTransfers,
       });
-
-      // Execute the Python optimizer as a subprocess
-      const scriptPath = path.resolve(process.cwd(), "brain/optimizer.py");
-      const result = execSync(`python3 "${scriptPath}" --json`, {
-        input: solverInput,
-        encoding: "utf-8",
-        timeout: 15000, // 15s max
-        maxBuffer: 1024 * 1024, // 1MB
-      });
-
-      const parsed = JSON.parse(result.trim());
-      if (parsed.error) {
-        console.error("[MILP] Solver error:", parsed.error);
-      } else {
-        milpOptimization = parsed;
-      }
-    } catch (milpErr) {
-      // Log but don't crash the entire response — the optimizer is non-critical
-      console.error(
-        "[MILP] Subprocess failed:",
-        milpErr instanceof Error ? milpErr.message : String(milpErr)
-      );
+    } catch (solverErr: unknown) {
+      const message = solverErr instanceof Error ? solverErr.message : String(solverErr);
+      console.error("[Solver] Failed:", message);
+      milpOptimization = { error: message };
     }
 
     return Response.json({
