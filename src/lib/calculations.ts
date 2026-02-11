@@ -260,6 +260,178 @@ export function simulateViceCaptain(
   };
 }
 
+// ---------- Safety Score Calculation ----------
+
+/**
+ * Rank tier definitions for safety score adjustment.
+ * Higher-ranked managers tend to converge on "template" squads,
+ * so effective ownership is more concentrated at the top.
+ */
+export type RankTier = "top10k" | "top50k" | "top100k" | "top500k" | "top1m" | "overall";
+
+export interface SafetyScoreResult {
+  safetyScore: number;        // The EO-weighted average score for this rank tier
+  rankTier: RankTier;         // Which tier was used
+  tierLabel: string;          // Human-readable label
+  delta: number;              // livePoints - safetyScore (positive = above safety)
+  arrow: "green" | "red" | "neutral";
+}
+
+/**
+ * Determine rank tier from an estimated or actual rank.
+ */
+export function getRankTier(rank: number): RankTier {
+  if (rank <= 10_000) return "top10k";
+  if (rank <= 50_000) return "top50k";
+  if (rank <= 100_000) return "top100k";
+  if (rank <= 500_000) return "top500k";
+  if (rank <= 1_000_000) return "top1m";
+  return "overall";
+}
+
+const TIER_LABELS: Record<RankTier, string> = {
+  top10k: "Top 10K",
+  top50k: "Top 50K",
+  top100k: "Top 100K",
+  top500k: "Top 500K",
+  top1m: "Top 1M",
+  overall: "Overall",
+};
+
+/**
+ * Ownership concentration factor per rank tier.
+ *
+ * At higher ranks, popular players are *more* widely owned, and differentials
+ * are less common. We model this by applying an exponent to ownership:
+ *   adjustedOwnership = ownership^(1/factor)  for factor > 1 (concentrates toward template)
+ *
+ * - top10k: highly template-heavy → exponent pushes high-ownership players higher
+ * - overall: raw ownership is used as-is
+ */
+const TIER_CONCENTRATION: Record<RankTier, number> = {
+  top10k: 1.35,
+  top50k: 1.25,
+  top100k: 1.15,
+  top500k: 1.08,
+  top1m: 1.04,
+  overall: 1.0,
+};
+
+/**
+ * Calculate the Safety Score for a given gameweek.
+ *
+ * Formula: SafetyScore = sum( playerLivePoints * adjustedOwnership(player) )
+ * where adjustedOwnership accounts for rank-tier template concentration.
+ *
+ * This represents the expected GW score for the "average manager" in your rank
+ * bracket. If your live points exceed this, you're likely gaining rank (green arrow).
+ *
+ * @param liveElements  - All players' live GW stats (from /event/{gw}/live/)
+ * @param elements      - Bootstrap elements with ownership data (selected_by_percent)
+ * @param rank          - The manager's estimated or actual rank
+ * @param captainId     - The most-captained player ID (if known) for EO captain boost
+ */
+export function calculateSafetyScore(
+  liveElements: PlayerElement[],
+  elements: { id: number; selected_by_percent?: string; element_type?: number }[],
+  rank: number,
+  captainId?: number
+): SafetyScoreResult {
+  const tier = getRankTier(rank);
+  const concentration = TIER_CONCENTRATION[tier];
+
+  // Build ownership lookup
+  const ownershipMap = new Map<number, number>();
+  for (const el of elements) {
+    const pct = parseFloat(el.selected_by_percent || "0");
+    ownershipMap.set(el.id, pct);
+  }
+
+  let totalEoPoints = 0;
+
+  for (const player of liveElements) {
+    const rawOwnership = ownershipMap.get(player.id) ?? 0;
+    if (rawOwnership <= 0) continue;
+
+    const ownershipFraction = rawOwnership / 100;
+
+    // Apply tier concentration: raise ownership to power 1/concentration
+    // This makes high-ownership players even more dominant at top ranks
+    const adjustedOwnership = Math.pow(ownershipFraction, 1 / concentration);
+
+    let points = player.stats.total_points;
+
+    // Captain boost: the most-captained player gets ~2x effective ownership
+    // since many managers captain them (approximate 60-80% captain rate for top pick)
+    if (captainId && player.id === captainId) {
+      // Model: top-captained player contributes extra points from captaincy
+      // At top ranks, captain convergence is higher
+      const captainMultiplier = tier === "top10k" ? 0.7 : tier === "top50k" ? 0.6 : 0.5;
+      points += player.stats.total_points * captainMultiplier * adjustedOwnership;
+    }
+
+    totalEoPoints += points * adjustedOwnership;
+  }
+
+  const safetyScore = Math.round(totalEoPoints);
+
+  return {
+    safetyScore,
+    rankTier: tier,
+    tierLabel: TIER_LABELS[tier],
+    delta: 0, // Caller should set: livePoints - safetyScore
+    arrow: "neutral", // Caller should set based on delta
+  };
+}
+
+/**
+ * Full safety score with delta and arrow direction computed.
+ */
+export function computeSafetyResult(
+  livePoints: number,
+  liveElements: PlayerElement[],
+  elements: { id: number; selected_by_percent?: string; element_type?: number }[],
+  rank: number,
+  captainId?: number
+): SafetyScoreResult {
+  const result = calculateSafetyScore(liveElements, elements, rank, captainId);
+  const delta = livePoints - result.safetyScore;
+  return {
+    ...result,
+    delta,
+    arrow: delta > 0 ? "green" : delta < 0 ? "red" : "neutral",
+  };
+}
+
+/**
+ * Find the most-captained player from bootstrap data.
+ * Uses a heuristic: highest (ownership% * form * points_per_game) among premium players.
+ */
+export function findMostCaptainedPlayer(
+  elements: { id: number; selected_by_percent?: string; now_cost?: number; form?: string; element_type?: number }[]
+): number | undefined {
+  let bestId: number | undefined;
+  let bestScore = 0;
+
+  for (const el of elements) {
+    const ownership = parseFloat(el.selected_by_percent || "0");
+    const form = parseFloat(el.form || "0");
+    const cost = (el.now_cost || 0) / 10;
+
+    // Only consider premium players (cost > 8.0) as captain candidates
+    if (cost < 8.0) continue;
+
+    // Captain score: ownership * form (popular + in-form = likely captained)
+    const score = ownership * form;
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = el.id;
+    }
+  }
+
+  return bestId;
+}
+
 // ---------- Enriched pick data for UI ----------
 
 export interface EnrichedPick {
