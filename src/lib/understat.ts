@@ -60,18 +60,43 @@ function decodeHexEscapes(encoded: string): string {
 }
 
 function extractVariable(html: string, variableName: string): unknown {
+  // Strategy 1: Search raw HTML directly (more reliable than cheerio parsing)
+  const searchPattern = `${variableName}\\s*=\\s*JSON\\.parse\\('`;
+  const startRegex = new RegExp(searchPattern);
+  const startMatch = html.match(startRegex);
+
+  if (startMatch && startMatch.index !== undefined) {
+    const startIdx = startMatch.index + startMatch[0].length;
+    // Find the closing ')  — look for the pattern  ')  which ends the JSON.parse call
+    const endIdx = html.indexOf("')", startIdx);
+    if (endIdx > startIdx) {
+      const encoded = html.substring(startIdx, endIdx);
+      try {
+        return JSON.parse(decodeHexEscapes(encoded));
+      } catch {
+        // Fall through to cheerio approach
+      }
+    }
+  }
+
+  // Strategy 2: Fallback to cheerio-based extraction
   const $ = cheerio.load(html);
   let result: unknown = null;
 
   $("script").each((_, script) => {
     const content = $(script).html() || "";
     if (content.includes(variableName)) {
+      // Use [\s\S] instead of . to match across newlines
       const regex = new RegExp(
-        `${variableName}\\s*=\\s*JSON\\.parse\\('(.+?)'\\)`
+        `${variableName}\\s*=\\s*JSON\\.parse\\('([\\s\\S]+?)'\\)`
       );
       const match = content.match(regex);
       if (match && match[1]) {
-        result = JSON.parse(decodeHexEscapes(match[1]));
+        try {
+          result = JSON.parse(decodeHexEscapes(match[1]));
+        } catch {
+          // Could not parse
+        }
       }
     }
   });
@@ -101,33 +126,64 @@ export async function fetchUnderstatPlayers(
 
   const url = `https://understat.com/league/EPL/${targetSeason}`;
 
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml",
-    },
-    next: { revalidate: 3600 },
-  });
+  // Retry with exponential backoff (network can be flaky)
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+      }
 
-  if (!res.ok) {
-    throw new Error(`Understat fetch failed: ${res.status}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5",
+        },
+        signal: controller.signal,
+        next: { revalidate: 3600 },
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`Understat fetch failed: ${res.status}`);
+      }
+
+      const html = await res.text();
+
+      if (!html || html.length < 1000) {
+        throw new Error("Understat returned empty or too-short response");
+      }
+
+      const rawPlayers = extractVariable(html, "playersData") as
+        | UnderstatPlayer[]
+        | null;
+
+      if (!rawPlayers || !Array.isArray(rawPlayers) || rawPlayers.length === 0) {
+        throw new Error(
+          `Failed to extract playersData from Understat (html length: ${html.length})`
+        );
+      }
+
+      const players = rawPlayers.map(parsePlayer);
+      cachedData = { players, fetchedAt: Date.now() };
+      return players;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(
+        `Understat fetch attempt ${attempt + 1}/3 failed:`,
+        lastError.message
+      );
+    }
   }
 
-  const html = await res.text();
-  const rawPlayers = extractVariable(html, "playersData") as
-    | UnderstatPlayer[]
-    | null;
-
-  if (!rawPlayers || !Array.isArray(rawPlayers)) {
-    throw new Error("Failed to extract playersData from Understat");
-  }
-
-  const players = rawPlayers.map(parsePlayer);
-
-  cachedData = { players, fetchedAt: Date.now() };
-
-  return players;
+  throw lastError || new Error("Understat fetch failed after retries");
 }
 
 function parsePlayer(raw: UnderstatPlayer): ParsedUnderstatPlayer {

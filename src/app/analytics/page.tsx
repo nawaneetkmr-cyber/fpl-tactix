@@ -67,7 +67,8 @@ type SortKey =
   | "goals"
   | "assists"
   | "form"
-  | "npxG";
+  | "npxG"
+  | "ownership";
 
 // ---------- Main Page ----------
 
@@ -154,30 +155,19 @@ function AnalyticsInner() {
     .sort((a, b) => {
       const getValue = (p: AnalyticsPlayer): number => {
         switch (sortKey) {
-          case "xPts":
-            return p.xPts;
-          case "totalPoints":
-            return p.totalPoints;
-          case "price":
-            return p.price;
-          case "shots":
-            return p.shots ?? 0;
-          case "keyPasses":
-            return p.keyPasses ?? 0;
-          case "xG":
-            return p.xG;
-          case "xA":
-            return p.xA;
-          case "goals":
-            return p.goals;
-          case "assists":
-            return p.assists;
-          case "form":
-            return parseFloat(p.form || "0");
-          case "npxG":
-            return p.npxG ?? 0;
-          default:
-            return 0;
+          case "xPts": return p.xPts;
+          case "totalPoints": return p.totalPoints;
+          case "price": return p.price;
+          case "shots": return p.shots ?? 0;
+          case "keyPasses": return p.keyPasses ?? 0;
+          case "xG": return p.xG;
+          case "xA": return p.xA;
+          case "goals": return p.goals;
+          case "assists": return p.assists;
+          case "form": return parseFloat(p.form || "0");
+          case "npxG": return p.npxG ?? 0;
+          case "ownership": return parseFloat(p.ownership || "0");
+          default: return 0;
         }
       };
       const diff = getValue(a) - getValue(b);
@@ -186,9 +176,7 @@ function AnalyticsInner() {
 
   // Group by verdict
   const keepPlayers = filteredPlayers.filter((p) => p.verdict === "KEEP");
-  const monitorPlayers = filteredPlayers.filter(
-    (p) => p.verdict === "MONITOR"
-  );
+  const monitorPlayers = filteredPlayers.filter((p) => p.verdict === "MONITOR");
   const sellPlayers = filteredPlayers.filter((p) => p.verdict === "SELL");
 
   const positionTabs = [
@@ -207,9 +195,9 @@ function AnalyticsInner() {
         </h1>
         <p className="text-slate-400 text-sm mt-1">
           Advanced stats powered by Understat + FPL data
-          {data?.understatAvailable === false && (
+          {data && !data.understatAvailable && (
             <span className="text-amber-400 ml-2">
-              (Understat unavailable - using FPL data only)
+              (Understat data loading failed - Shots, KP, npxG show as &quot;-&quot;)
             </span>
           )}
         </p>
@@ -235,7 +223,6 @@ function AnalyticsInner() {
 
       {/* Filters Row */}
       <div className="flex flex-wrap items-center gap-3">
-        {/* Search */}
         <input
           type="text"
           placeholder="Search player..."
@@ -244,7 +231,6 @@ function AnalyticsInner() {
           className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-50 placeholder-slate-500 focus:outline-none focus:border-purple-500 text-sm w-48"
         />
 
-        {/* Verdict Filter */}
         <div className="flex gap-1 bg-slate-800 rounded-lg p-0.5">
           {["ALL", "KEEP", "MONITOR", "SELL"].map((v) => (
             <button
@@ -267,7 +253,6 @@ function AnalyticsInner() {
           ))}
         </div>
 
-        {/* Squad Toggle */}
         {data?.squadIds && data.squadIds.length > 0 && (
           <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
             <input
@@ -280,7 +265,6 @@ function AnalyticsInner() {
           </label>
         )}
 
-        {/* Player count */}
         <span className="text-slate-500 text-sm ml-auto">
           {filteredPlayers.length} players
         </span>
@@ -326,7 +310,6 @@ function AnalyticsInner() {
                   sortAsc={sortAsc}
                   onSort={handleSort}
                   squadIds={new Set(data.squadIds)}
-                  understatAvailable={data.understatAvailable}
                 />
               )}
               {monitorPlayers.length > 0 && (
@@ -338,7 +321,6 @@ function AnalyticsInner() {
                   sortAsc={sortAsc}
                   onSort={handleSort}
                   squadIds={new Set(data.squadIds)}
-                  understatAvailable={data.understatAvailable}
                 />
               )}
               {sellPlayers.length > 0 && (
@@ -350,7 +332,6 @@ function AnalyticsInner() {
                   sortAsc={sortAsc}
                   onSort={handleSort}
                   squadIds={new Set(data.squadIds)}
-                  understatAvailable={data.understatAvailable}
                 />
               )}
             </>
@@ -363,65 +344,64 @@ function AnalyticsInner() {
               sortAsc={sortAsc}
               onSort={handleSort}
               squadIds={new Set(data.squadIds)}
-              understatAvailable={data.understatAvailable}
             />
           )}
 
           {/* Table Key */}
           <div className="bg-slate-900 rounded-xl border border-slate-700 p-4">
-            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
+            <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">
               Table Key
             </h3>
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
               <span className="flex items-center gap-2">
                 <span className="analytics-icon-diff">D</span>
-                <span className="text-slate-400">
-                  Differential (&lt;10% owned)
-                </span>
+                <span className="text-slate-300">Differential (&lt;10% owned)</span>
               </span>
               <span className="flex items-center gap-2">
                 <span className="analytics-icon-rotation">R</span>
-                <span className="text-slate-400">Rotation risk</span>
+                <span className="text-slate-300">Rotation risk</span>
               </span>
               <span className="flex items-center gap-2">
                 <span className="analytics-icon-maybe">?</span>
-                <span className="text-slate-400">May be unavailable</span>
+                <span className="text-slate-300">May be unavailable</span>
               </span>
               <span className="flex items-center gap-2">
                 <span className="analytics-icon-unavailable">X</span>
-                <span className="text-slate-400">Unavailable</span>
+                <span className="text-slate-300">Unavailable</span>
               </span>
               <span className="flex items-center gap-2">
                 <span className="analytics-icon-squad">S</span>
-                <span className="text-slate-400">In your squad</span>
+                <span className="text-slate-300">In your squad</span>
               </span>
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mt-3">
-              <span className="text-slate-500">
-                S = Shots | KP = Key Passes | npxG = Non-Penalty xG | xGC =
-                xG Chain
+              <span className="text-slate-400">
+                <strong className="text-sky-400">S</strong> = Shots (Understat) |{" "}
+                <strong className="text-sky-400">KP</strong> = Key Passes (Understat) |{" "}
+                <strong className="text-sky-400">npxG</strong> = Non-Penalty xG (Understat) |{" "}
+                <strong className="text-emerald-400">EO</strong> = Effective Ownership %
               </span>
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm mt-2">
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-sm analytics-fdr-1" />
-                <span className="text-slate-500">Very Easy</span>
+                <span className="text-slate-400">Very Easy</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-sm analytics-fdr-2" />
-                <span className="text-slate-500">Easy</span>
+                <span className="text-slate-400">Easy</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-sm analytics-fdr-3" />
-                <span className="text-slate-500">Medium</span>
+                <span className="text-slate-400">Medium</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-sm analytics-fdr-4" />
-                <span className="text-slate-500">Hard</span>
+                <span className="text-slate-400">Hard</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-sm analytics-fdr-5" />
-                <span className="text-slate-500">Very Hard</span>
+                <span className="text-slate-400">Very Hard</span>
               </span>
             </div>
           </div>
@@ -441,7 +421,6 @@ function VerdictSection({
   sortAsc,
   onSort,
   squadIds,
-  understatAvailable,
 }: {
   label: "KEEP" | "MONITOR" | "SELL";
   players: AnalyticsPlayer[];
@@ -450,26 +429,22 @@ function VerdictSection({
   sortAsc: boolean;
   onSort: (key: SortKey) => void;
   squadIds: Set<number>;
-  understatAvailable: boolean;
 }) {
   const verdictStyles = {
     KEEP: {
       border: "border-emerald-700/50",
       bg: "bg-emerald-900/10",
       badge: "bg-emerald-600 text-white",
-      label: "text-emerald-400",
     },
     MONITOR: {
       border: "border-amber-700/50",
       bg: "bg-amber-900/10",
       badge: "bg-amber-600 text-white",
-      label: "text-amber-400",
     },
     SELL: {
       border: "border-red-700/50",
       bg: "bg-red-900/10",
       badge: "bg-red-600 text-white",
-      label: "text-red-400",
     },
   };
 
@@ -479,9 +454,7 @@ function VerdictSection({
     <div className={`rounded-xl border ${style.border} ${style.bg} overflow-hidden`}>
       {/* Section Header */}
       <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-3">
-        <span
-          className={`px-2.5 py-1 rounded text-xs font-bold ${style.badge}`}
-        >
+        <span className={`px-2.5 py-1 rounded text-xs font-bold ${style.badge}`}>
           {label}
         </span>
         <span className="text-slate-400 text-sm">
@@ -496,83 +469,18 @@ function VerdictSection({
             <tr>
               <th className="analytics-th analytics-th-sticky">Player</th>
               <th className="analytics-th">Team</th>
-              <th
-                className="analytics-th analytics-th-sortable"
-                onClick={() => onSort("price")}
-              >
-                {"\u00A3"}
-                {sortKey === "price" && (
-                  <SortArrow asc={sortAsc} />
-                )}
-              </th>
+              <SortTh label={"\u00A3"} sortKey="price" currentKey={sortKey} asc={sortAsc} onSort={onSort} />
               <th className="analytics-th">App</th>
-              {understatAvailable && (
-                <>
-                  <th
-                    className="analytics-th analytics-th-sortable"
-                    onClick={() => onSort("shots")}
-                  >
-                    S{sortKey === "shots" && <SortArrow asc={sortAsc} />}
-                  </th>
-                  <th
-                    className="analytics-th analytics-th-sortable"
-                    onClick={() => onSort("keyPasses")}
-                  >
-                    KP
-                    {sortKey === "keyPasses" && (
-                      <SortArrow asc={sortAsc} />
-                    )}
-                  </th>
-                </>
-              )}
-              <th
-                className="analytics-th analytics-th-sortable"
-                onClick={() => onSort("xG")}
-              >
-                xG{sortKey === "xG" && <SortArrow asc={sortAsc} />}
-              </th>
-              <th
-                className="analytics-th analytics-th-sortable"
-                onClick={() => onSort("goals")}
-              >
-                G{sortKey === "goals" && <SortArrow asc={sortAsc} />}
-              </th>
-              <th
-                className="analytics-th analytics-th-sortable"
-                onClick={() => onSort("xA")}
-              >
-                xA{sortKey === "xA" && <SortArrow asc={sortAsc} />}
-              </th>
-              <th
-                className="analytics-th analytics-th-sortable"
-                onClick={() => onSort("assists")}
-              >
-                A{sortKey === "assists" && <SortArrow asc={sortAsc} />}
-              </th>
-              {understatAvailable && (
-                <th
-                  className="analytics-th analytics-th-sortable"
-                  onClick={() => onSort("npxG")}
-                >
-                  npxG
-                  {sortKey === "npxG" && <SortArrow asc={sortAsc} />}
-                </th>
-              )}
-              <th
-                className="analytics-th analytics-th-sortable analytics-th-accent"
-                onClick={() => onSort("xPts")}
-              >
-                xPts{sortKey === "xPts" && <SortArrow asc={sortAsc} />}
-              </th>
-              <th
-                className="analytics-th analytics-th-sortable"
-                onClick={() => onSort("totalPoints")}
-              >
-                Pts
-                {sortKey === "totalPoints" && (
-                  <SortArrow asc={sortAsc} />
-                )}
-              </th>
+              <SortTh label="S" sortKey="shots" currentKey={sortKey} asc={sortAsc} onSort={onSort} className="analytics-th-understat" title="Shots (Understat)" />
+              <SortTh label="KP" sortKey="keyPasses" currentKey={sortKey} asc={sortAsc} onSort={onSort} className="analytics-th-understat" title="Key Passes (Understat)" />
+              <SortTh label="xG" sortKey="xG" currentKey={sortKey} asc={sortAsc} onSort={onSort} />
+              <SortTh label="G" sortKey="goals" currentKey={sortKey} asc={sortAsc} onSort={onSort} />
+              <SortTh label="xA" sortKey="xA" currentKey={sortKey} asc={sortAsc} onSort={onSort} />
+              <SortTh label="A" sortKey="assists" currentKey={sortKey} asc={sortAsc} onSort={onSort} />
+              <SortTh label="npxG" sortKey="npxG" currentKey={sortKey} asc={sortAsc} onSort={onSort} className="analytics-th-understat" title="Non-Penalty xG (Understat)" />
+              <SortTh label="EO%" sortKey="ownership" currentKey={sortKey} asc={sortAsc} onSort={onSort} className="analytics-th-accent" title="Effective Ownership %" />
+              <SortTh label="xPts" sortKey="xPts" currentKey={sortKey} asc={sortAsc} onSort={onSort} className="analytics-th-accent" />
+              <SortTh label="Pts" sortKey="totalPoints" currentKey={sortKey} asc={sortAsc} onSort={onSort} />
               {upcomingGWs.map((gw) => (
                 <th key={gw} className="analytics-th analytics-th-fixture">
                   GW{gw}
@@ -587,7 +495,6 @@ function VerdictSection({
                 player={p}
                 upcomingGWs={upcomingGWs}
                 isInSquad={squadIds.has(p.id)}
-                understatAvailable={understatAvailable}
               />
             ))}
           </tbody>
@@ -597,18 +504,48 @@ function VerdictSection({
   );
 }
 
+// ---------- Sortable Table Header ----------
+
+function SortTh({
+  label,
+  sortKey,
+  currentKey,
+  asc,
+  onSort,
+  className,
+  title,
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentKey: SortKey;
+  asc: boolean;
+  onSort: (key: SortKey) => void;
+  className?: string;
+  title?: string;
+}) {
+  const isActive = currentKey === sortKey;
+  return (
+    <th
+      className={`analytics-th analytics-th-sortable ${className || ""} ${isActive ? "analytics-th-active" : ""}`}
+      onClick={() => onSort(sortKey)}
+      title={title}
+    >
+      {label}
+      {isActive && <SortArrow asc={asc} />}
+    </th>
+  );
+}
+
 // ---------- Player Row ----------
 
 function PlayerRow({
   player: p,
   upcomingGWs,
   isInSquad,
-  understatAvailable,
 }: {
   player: AnalyticsPlayer;
   upcomingGWs: number[];
   isInSquad: boolean;
-  understatAvailable: boolean;
 }) {
   const [showReasons, setShowReasons] = useState(false);
 
@@ -640,62 +577,51 @@ function PlayerRow({
           </div>
         </td>
         <td className="analytics-td text-slate-400">{p.team}</td>
-        <td className="analytics-td text-slate-300">
-          {p.price.toFixed(1)}
+        <td className="analytics-td text-slate-200">{p.price.toFixed(1)}</td>
+        <td className="analytics-td text-slate-300">{p.appearances}</td>
+        {/* Understat stats - always show columns, "-" if unavailable */}
+        <td className="analytics-td text-sky-300">{p.shots ?? "-"}</td>
+        <td className="analytics-td text-sky-300">{p.keyPasses ?? "-"}</td>
+        <td className="analytics-td text-cyan-400 font-medium">{p.xG.toFixed(2)}</td>
+        <td className="analytics-td text-slate-50 font-semibold">{p.goals}</td>
+        <td className="analytics-td text-cyan-400 font-medium">{p.xA.toFixed(2)}</td>
+        <td className="analytics-td text-slate-50 font-semibold">{p.assists}</td>
+        <td className="analytics-td text-sky-300">
+          {p.npxG !== null ? p.npxG.toFixed(2) : "-"}
         </td>
-        <td className="analytics-td text-slate-400">{p.appearances}</td>
-        {understatAvailable && (
-          <>
-            <td className="analytics-td text-slate-300">
-              {p.shots ?? "-"}
-            </td>
-            <td className="analytics-td text-slate-300">
-              {p.keyPasses ?? "-"}
-            </td>
-          </>
-        )}
-        <td className="analytics-td text-cyan-400">{p.xG.toFixed(2)}</td>
-        <td className="analytics-td text-slate-50 font-semibold">
-          {p.goals}
+        {/* EO - Effective Ownership */}
+        <td className="analytics-td text-amber-300 font-medium">
+          {parseFloat(p.ownership || "0").toFixed(1)}%
         </td>
-        <td className="analytics-td text-cyan-400">{p.xA.toFixed(2)}</td>
-        <td className="analytics-td text-slate-50 font-semibold">
-          {p.assists}
-        </td>
-        {understatAvailable && (
-          <td className="analytics-td text-cyan-300">
-            {p.npxG !== null ? p.npxG.toFixed(2) : "-"}
-          </td>
-        )}
         <td className="analytics-td text-emerald-400 font-bold">
           {p.xPts.toFixed(1)}
         </td>
         <td className="analytics-td text-slate-50 font-semibold">
           {p.totalPoints}
         </td>
+        {/* Upcoming fixture difficulty badges */}
         {upcomingGWs.map((gw) => {
           const fixture = p.upcomingFixtures.find((f) => f.gw === gw);
           if (!fixture || fixture.opponent === "-") {
             return (
-              <td key={gw} className="analytics-td">
+              <td key={gw} className="analytics-td text-center">
                 <span className="analytics-fdr-blank">-</span>
               </td>
             );
           }
           return (
-            <td key={gw} className="analytics-td">
+            <td key={gw} className="analytics-td text-center">
               <span
                 className={`analytics-fdr analytics-fdr-${fixture.difficulty}`}
                 title={`GW${gw}: ${fixture.isHome ? "Home" : "Away"} vs ${fixture.opponent} (FDR ${fixture.difficulty})`}
               >
                 {fixture.opponent}
-                {fixture.isHome ? " (H)" : " (A)"}
+                {fixture.isHome ? "(H)" : "(A)"}
               </span>
             </td>
           );
         })}
       </tr>
-      {/* Expandable reasons row */}
       {showReasons && p.verdictReasons.length > 0 && (
         <tr className="analytics-reasons-row">
           <td
@@ -717,7 +643,7 @@ function PlayerRow({
 
 function SortArrow({ asc }: { asc: boolean }) {
   return (
-    <span className="ml-0.5 text-purple-400 text-[10px]">
+    <span className="ml-0.5 text-purple-300 text-[10px]">
       {asc ? "\u25B2" : "\u25BC"}
     </span>
   );

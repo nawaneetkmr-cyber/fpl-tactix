@@ -337,12 +337,12 @@ body {
   padding: 8px 10px;
   text-align: left;
   font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
+  font-weight: 700;
+  color: #e2e8f0;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--card-border);
-  background: rgba(15, 23, 42, 0.6);
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid #475569;
+  background: #1e293b;
   position: sticky;
   top: 0;
   z-index: 5;
@@ -355,11 +355,21 @@ body {
 }
 
 .analytics-th-sortable:hover {
-  color: var(--foreground);
+  color: #fff;
+  background: #334155;
+}
+
+.analytics-th-active {
+  color: #c4b5fd;
+  background: #1e293b;
 }
 
 .analytics-th-accent {
-  color: var(--accent);
+  color: #00ff87;
+}
+
+.analytics-th-understat {
+  color: #38bdf8;
 }
 
 .analytics-th-fixture {
@@ -367,13 +377,28 @@ body {
   min-width: 72px;
 }
 
-.analytics-th-sticky,
+.analytics-th-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 8;
+  background: #1e293b;
+  min-width: 130px;
+}
+
 .analytics-td-sticky {
   position: sticky;
   left: 0;
   z-index: 6;
-  background: rgba(15, 23, 42, 0.95);
+  background: #0f172a;
   min-width: 130px;
+}
+
+.analytics-row:hover .analytics-td-sticky {
+  background: #1a2234;
+}
+
+.analytics-row-squad .analytics-td-sticky {
+  background: rgba(15, 23, 42, 0.95);
 }
 
 .analytics-td {

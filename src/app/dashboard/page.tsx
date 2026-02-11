@@ -451,6 +451,28 @@ function DashboardInner() {
         />
       </section>
 
+      {/* ===== ANALYTICS DISCOVERY BANNER ===== */}
+      <section>
+        <a
+          href={`/analytics?teamId=${teamId}`}
+          className="block rounded-xl border border-purple-700/50 bg-gradient-to-r from-purple-900/30 via-indigo-900/20 to-slate-900 p-5 hover:border-purple-500/70 transition-all group"
+        >
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h2 className="text-lg font-bold text-slate-50 group-hover:text-purple-300 transition-colors">
+                Player Analytics
+              </h2>
+              <p className="text-sm text-slate-400 mt-1">
+                Advanced stats: Shots, Key Passes, npxG, xG Chain, EO% — powered by Understat + FPL. KEEP / MONITOR / SELL verdicts for every player.
+              </p>
+            </div>
+            <span className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-semibold group-hover:bg-purple-500 transition-colors whitespace-nowrap">
+              Open Analytics
+            </span>
+          </div>
+        </a>
+      </section>
+
       {/* ===== SECTION 2: QUICK STATS ===== */}
       <section>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
