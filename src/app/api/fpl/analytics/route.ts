@@ -74,46 +74,82 @@ function classifyPlayer(
 ): { verdict: Verdict; reasons: string[] } {
   const reasons: string[] = [];
   let score = 0;
+  const posType = el.element_type as number; // 1=GKP 2=DEF 3=MID 4=FWD
+  const isDef = posType === 1 || posType === 2;
 
+  // --- Form ---
   const form = parseFloat(el.form || "0");
-
   if (form >= 6) { score += 2; reasons.push("Excellent form"); }
   else if (form >= 4) { score += 1; }
   else if (form < 2) { score -= 2; reasons.push("Poor form"); }
 
-  if (xPts >= 5) { score += 2; reasons.push("High xPts projection"); }
-  else if (xPts >= 3.5) { score += 1; }
+  // --- xPts (primary signal, already factors in fixtures) ---
+  if (xPts >= 5) { score += 3; reasons.push("High xPts projection"); }
+  else if (xPts >= 3.5) { score += 2; reasons.push("Good xPts projection"); }
+  else if (xPts >= 2) { score += 1; }
   else if (xPts < 2) { score -= 2; reasons.push("Low xPts projection"); }
 
+  // --- Points per start (proven output, position-independent) ---
+  const starts = (el.starts as number) || 0;
+  const totalPts = (el.total_points as number) || 0;
+  if (starts >= 5) {
+    const ptsPerStart = totalPts / starts;
+    if (ptsPerStart >= 5.5) { score += 2; reasons.push("Elite pts/start (" + ptsPerStart.toFixed(1) + ")"); }
+    else if (ptsPerStart >= 4.5) { score += 1; reasons.push("Strong pts/start (" + ptsPerStart.toFixed(1) + ")"); }
+  }
+
+  // --- Defensive contribution (DEF/GKP only) ---
+  if (isDef) {
+    const cs = (el.clean_sheets as number) || 0;
+    const dc = (el.defensive_contribution ?? 0) as number;
+    const csPer90 = (el.clean_sheets_per_90 ?? 0) as number;
+
+    // Clean sheet rate — the bread and butter of defender value
+    if (csPer90 >= 0.35) { score += 2; reasons.push("Elite CS rate (" + csPer90.toFixed(2) + "/90)"); }
+    else if (csPer90 >= 0.25) { score += 1; reasons.push("Good CS rate"); }
+    else if (cs <= 2 && starts >= 10) { score -= 1; reasons.push("Very few clean sheets"); }
+
+    // Defensive contribution score
+    if (dc > 0 && starts >= 5) {
+      const dcPerStart = dc / starts;
+      if (dcPerStart >= 6) { score += 1; reasons.push("High defensive contribution"); }
+    }
+  }
+
+  // --- Process stats (position-aware thresholds) ---
+  if (!isDef) {
+    // Attackers/midfielders: threat & creativity
+    const threatPerGame = starts > 0 ? parseFloat(el.threat || "0") / starts : 0;
+    const creativityPerGame = starts > 0 ? parseFloat(el.creativity || "0") / starts : 0;
+    if (threatPerGame >= 40) { score += 1; reasons.push("High goal threat"); }
+    if (creativityPerGame >= 30) { score += 1; reasons.push("High chance creation"); }
+
+    // xG overperformance (attackers only — defenders score set pieces sustainably)
+    const xg = parseFloat(el.expected_goals || "0");
+    if (el.goals_scored > 0 && xg > 0) {
+      const ratio = (el.goals_scored as number) / xg;
+      if (ratio > 1.5 && xg >= 3) { score -= 1; reasons.push("Overperforming xG"); }
+      else if (ratio < 0.65 && xg > 2) { score += 1; reasons.push("Underperforming xG — due a correction"); }
+    }
+  }
+
+  // --- Fixture difficulty (light touch, xPts already captures this) ---
   if (upcomingDifficulty.length > 0) {
     const avgDiff = upcomingDifficulty.reduce((a, b) => a + b, 0) / upcomingDifficulty.length;
-    if (avgDiff <= 2.5) { score += 2; reasons.push("Great upcoming fixtures"); }
-    else if (avgDiff <= 3) { score += 1; }
-    else if (avgDiff >= 4) { score -= 2; reasons.push("Tough upcoming fixtures"); }
+    if (avgDiff <= 2.5) { score += 1; reasons.push("Great upcoming fixtures"); }
+    else if (avgDiff >= 4.5) { score -= 1; reasons.push("Very tough upcoming fixtures"); }
   }
 
-  // Threat/creativity check (FPL process stats)
-  const threatPerGame = el.starts > 0 ? parseFloat(el.threat || "0") / el.starts : 0;
-  const creativityPerGame = el.starts > 0 ? parseFloat(el.creativity || "0") / el.starts : 0;
-  if (threatPerGame >= 40) { score += 1; reasons.push("High goal threat"); }
-  if (creativityPerGame >= 30) { score += 1; reasons.push("High chance creation"); }
-
-  // xG overperformance check
-  const xg = parseFloat(el.expected_goals || "0");
-  if (el.goals_scored > 0 && xg > 0) {
-    const ratio = el.goals_scored / xg;
-    if (ratio > 1.5) { score -= 1; reasons.push("Overperforming xG"); }
-    else if (ratio < 0.65 && xg > 2) { score += 1; reasons.push("Underperforming xG"); }
-  }
-
+  // --- Availability ---
   if (el.status === "i" || el.status === "s" || el.status === "n") {
     score -= 3; reasons.push("Unavailable");
   } else if (el.status === "d") {
     score -= 1; reasons.push("Doubtful");
   }
 
-  if (el.starts > 0) {
-    const startRate = el.starts / Math.max(el.starts + 5, 20);
+  // --- Rotation risk ---
+  if (starts > 0) {
+    const startRate = starts / Math.max(starts + 5, 20);
     if (startRate < 0.5) { score -= 1; reasons.push("Rotation risk"); }
   }
 
