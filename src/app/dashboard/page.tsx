@@ -141,12 +141,13 @@ function DashboardInner() {
   const [analyticsUpcomingGWs, setAnalyticsUpcomingGWs] = useState<number[]>([]);
   const [analyticsSquadIds, setAnalyticsSquadIds] = useState<Set<number>>(new Set());
   const [analyticsPosition, setAnalyticsPosition] = useState<number>(4);
+  const [analyticsRange, setAnalyticsRange] = useState<"season" | "last5">("season");
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
-  const fetchAnalytics = useCallback(async (pos: number, tid: string) => {
+  const fetchAnalytics = useCallback(async (pos: number, tid: string, range: string) => {
     setAnalyticsLoading(true);
     try {
-      const params = new URLSearchParams({ position: String(pos) });
+      const params = new URLSearchParams({ position: String(pos), range });
       if (tid) params.set("teamId", tid);
       const res = await fetch(`/api/fpl/analytics?${params}`);
       const json = await res.json();
@@ -159,12 +160,12 @@ function DashboardInner() {
     setAnalyticsLoading(false);
   }, []);
 
-  // Fetch analytics when position changes or data loads
+  // Fetch analytics when position/range changes or data loads
   useEffect(() => {
     if (data && !data.error && teamId) {
-      fetchAnalytics(analyticsPosition, teamId);
+      fetchAnalytics(analyticsPosition, teamId, analyticsRange);
     }
-  }, [data, analyticsPosition, teamId, fetchAnalytics]);
+  }, [data, analyticsPosition, analyticsRange, teamId, fetchAnalytics]);
 
   const fetchData = useCallback(async (id: string) => {
     if (!id) return;
@@ -488,7 +489,7 @@ function DashboardInner() {
           <div>
             <h2 className="text-2xl font-bold text-slate-50">Player Analytics</h2>
             <p className="text-sm text-slate-400 mt-1">
-              xG, xA, Threat, Creativity, DC, CS — KEEP / MONITOR / SELL verdicts
+              Per-90 stats — xG, xA, KP, BPS, DC, CS with KEEP / MONITOR / SELL verdicts
             </p>
           </div>
           <a
@@ -532,6 +533,8 @@ function DashboardInner() {
             upcomingGWs={analyticsUpcomingGWs}
             squadIds={analyticsSquadIds}
             positionId={analyticsPosition}
+            range={analyticsRange}
+            onRangeChange={setAnalyticsRange}
           />
         ) : (
           <p className="text-slate-500 py-4">No analytics data available</p>

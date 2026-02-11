@@ -31,12 +31,13 @@ function AnalyticsInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activePosition, setActivePosition] = useState<number>(4);
+  const [range, setRange] = useState<"season" | "last5">("season");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ position: String(activePosition) });
+      const params = new URLSearchParams({ position: String(activePosition), range });
       if (teamIdParam) params.set("teamId", teamIdParam);
       const res = await fetch(`/api/fpl/analytics?${params}`);
       const json = await res.json();
@@ -44,7 +45,7 @@ function AnalyticsInner() {
       else setData(json);
     } catch (e) { setError(String(e)); }
     setLoading(false);
-  }, [activePosition, teamIdParam]);
+  }, [activePosition, range, teamIdParam]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -60,7 +61,7 @@ function AnalyticsInner() {
       <header>
         <h1 className="text-xl font-bold text-white">Player Analytics</h1>
         <p className="text-slate-500 text-sm mt-0.5">
-          FPL advanced stats — Threat, Creativity, DC, xG, xA, EO% with KEEP / MONITOR / SELL verdicts
+          Per-90 stats — xG, xA, KP, BPS, DC, CS with KEEP / MONITOR / SELL verdicts
         </p>
       </header>
 
@@ -100,6 +101,8 @@ function AnalyticsInner() {
           upcomingGWs={data.upcomingGWs}
           squadIds={new Set(data.squadIds)}
           positionId={activePosition}
+          range={range}
+          onRangeChange={setRange}
         />
       )}
     </div>

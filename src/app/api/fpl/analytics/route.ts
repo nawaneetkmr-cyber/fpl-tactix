@@ -15,39 +15,29 @@ interface AnalyticsPlayer {
   position: string;
   positionId: number;
   price: number;
-  // Core stats
-  appearances: number;
-  goals: number;
-  assists: number;
-  cleanSheets: number;
-  goalsConceded: number;
+  minutes: number;
+  starts: number;
   totalPoints: number;
   form: string;
   ownership: string;
   status: string;
   chanceOfPlaying: number | null;
-  // Expected stats
-  xG: number;
-  xA: number;
-  xGI: number;
-  xGC: number;
-  xPts: number;
-  // ICT components (FPL's underlying process stats)
-  threat: number; // shot proxy
-  creativity: number; // chance creation proxy
-  influence: number;
-  ictIndex: number;
-  // Defensive stats
-  defensiveContribution: number;
-  defensiveContributionPer90: number;
-  cleanSheetsPer90: number;
-  goalsConcededPer90: number;
-  saves: number;
-  savesPer90: number;
+  // Per-90 stats
+  xGp90: number;
+  goalsp90: number;
+  xAp90: number;
+  assistsp90: number;
+  xGIp90: number;
+  xGCp90: number;
+  kpP90: number;   // creativity per 90 (key pass / chance creation proxy)
+  bpsP90: number;  // BPS per 90 (bonus point system score)
+  dcP90: number;   // defensive contribution per 90
+  csp90: number;   // clean sheets per 90
+  gcp90: number;   // goals conceded per 90
+  svP90: number;   // saves per 90 (GKP)
   penaltiesSaved: number;
-  // BPS and bonus
-  bps: number;
   bonus: number;
+  xPts: number;
   // Classification
   verdict: Verdict;
   verdictReasons: string[];
@@ -65,17 +55,25 @@ interface AnalyticsPlayer {
   }[];
 }
 
+// ---------- Helpers ----------
+
+function p90(stat: number, minutes: number): number {
+  if (minutes < 45) return 0;
+  return Math.round((stat / minutes) * 90 * 100) / 100;
+}
+
 // ---------- KEEP / MONITOR / SELL ----------
 
 function classifyPlayer(
-  el: FullElement & Record<string, unknown>,
+  el: Record<string, unknown>,
   xPts: number,
-  upcomingDifficulty: number[]
+  upcomingDifficulty: number[],
+  minutes: number
 ): { verdict: Verdict; reasons: string[] } {
   const reasons: string[] = [];
   let score = 0;
 
-  const form = parseFloat(el.form || "0");
+  const form = parseFloat((el.form as string) || "0");
 
   if (form >= 6) { score += 2; reasons.push("Excellent form"); }
   else if (form >= 4) { score += 1; }
@@ -92,16 +90,17 @@ function classifyPlayer(
     else if (avgDiff >= 4) { score -= 2; reasons.push("Tough upcoming fixtures"); }
   }
 
-  // Threat/creativity check (FPL process stats)
-  const threatPerGame = el.starts > 0 ? parseFloat(el.threat || "0") / el.starts : 0;
-  const creativityPerGame = el.starts > 0 ? parseFloat(el.creativity || "0") / el.starts : 0;
-  if (threatPerGame >= 40) { score += 1; reasons.push("High goal threat"); }
-  if (creativityPerGame >= 30) { score += 1; reasons.push("High chance creation"); }
+  // Creativity/Threat per 90 check
+  const creativityP90 = p90(parseFloat((el.creativity as string) || "0"), minutes);
+  const threatP90 = p90(parseFloat((el.threat as string) || "0"), minutes);
+  if (threatP90 >= 35) { score += 1; reasons.push("High goal threat"); }
+  if (creativityP90 >= 25) { score += 1; reasons.push("High chance creation"); }
 
   // xG overperformance check
-  const xg = parseFloat(el.expected_goals || "0");
-  if (el.goals_scored > 0 && xg > 0) {
-    const ratio = el.goals_scored / xg;
+  const xg = parseFloat((el.expected_goals as string) || "0");
+  const goals = (el.goals_scored as number) || 0;
+  if (goals > 0 && xg > 0) {
+    const ratio = goals / xg;
     if (ratio > 1.5) { score -= 1; reasons.push("Overperforming xG"); }
     else if (ratio < 0.65 && xg > 2) { score += 1; reasons.push("Underperforming xG"); }
   }
@@ -112,8 +111,9 @@ function classifyPlayer(
     score -= 1; reasons.push("Doubtful");
   }
 
-  if (el.starts > 0) {
-    const startRate = el.starts / Math.max(el.starts + 5, 20);
+  const starts = (el.starts as number) || 0;
+  if (starts > 0) {
+    const startRate = starts / Math.max(starts + 5, 20);
     if (startRate < 0.5) { score -= 1; reasons.push("Rotation risk"); }
   }
 
@@ -132,6 +132,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const teamIdParam = searchParams.get("teamId");
     const positionFilter = searchParams.get("position");
+    const range = searchParams.get("range") || "season"; // "season" | "last5"
 
     // Fetch FPL bootstrap + fixtures in parallel
     const [bootstrapRes, fixturesRes] = await Promise.all([
@@ -221,6 +222,69 @@ export async function GET(req: Request) {
       } catch { /* silent */ }
     }
 
+    // ---------- Last 5 GW aggregation ----------
+    let last5Map: Map<number, {
+      minutes: number; starts: number; goals_scored: number; assists: number;
+      clean_sheets: number; goals_conceded: number; saves: number;
+      bps: number; bonus: number; creativity: number; threat: number;
+      expected_goals: number; expected_assists: number;
+      expected_goal_involvements: number; expected_goals_conceded: number;
+      total_points: number; penalties_saved: number;
+    }> | null = null;
+
+    if (range === "last5") {
+      const finishedGWs = events
+        .filter((e: { finished: boolean }) => e.finished)
+        .sort((a: { id: number }, b: { id: number }) => b.id - a.id)
+        .slice(0, 5)
+        .map((e: { id: number }) => e.id);
+
+      if (finishedGWs.length > 0) {
+        const liveResults = await Promise.all(
+          finishedGWs.map((gw: number) =>
+            fetch(`https://fantasy.premierleague.com/api/event/${gw}/live/`, {
+              headers: { "user-agent": "FPL Tactix/1.0" },
+            }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+          )
+        );
+
+        last5Map = new Map();
+        for (const liveData of liveResults) {
+          if (!liveData?.elements) continue;
+          for (const el of liveData.elements) {
+            const s = el.stats;
+            if (!s || s.minutes === 0) continue;
+            const existing = last5Map.get(el.id) || {
+              minutes: 0, starts: 0, goals_scored: 0, assists: 0,
+              clean_sheets: 0, goals_conceded: 0, saves: 0,
+              bps: 0, bonus: 0, creativity: 0, threat: 0,
+              expected_goals: 0, expected_assists: 0,
+              expected_goal_involvements: 0, expected_goals_conceded: 0,
+              total_points: 0, penalties_saved: 0,
+            };
+            existing.minutes += s.minutes || 0;
+            existing.starts += s.starts || 0;
+            existing.goals_scored += s.goals_scored || 0;
+            existing.assists += s.assists || 0;
+            existing.clean_sheets += s.clean_sheets || 0;
+            existing.goals_conceded += s.goals_conceded || 0;
+            existing.saves += s.saves || 0;
+            existing.bps += s.bps || 0;
+            existing.bonus += s.bonus || 0;
+            existing.creativity += parseFloat(s.creativity || "0");
+            existing.threat += parseFloat(s.threat || "0");
+            existing.expected_goals += parseFloat(s.expected_goals || "0");
+            existing.expected_assists += parseFloat(s.expected_assists || "0");
+            existing.expected_goal_involvements += parseFloat(s.expected_goal_involvements || "0");
+            existing.expected_goals_conceded += parseFloat(s.expected_goals_conceded || "0");
+            existing.total_points += s.total_points || 0;
+            existing.penalties_saved += s.penalties_saved || 0;
+            last5Map.set(el.id, existing);
+          }
+        }
+      }
+    }
+
     // Upcoming fixtures per team (next 4 GWs)
     const upcomingGWs = Array.from({ length: 4 }, (_, i) => targetGW + i);
     const teamUpcomingFixtures = new Map<number, { gw: number; opponent: string; difficulty: number; isHome: boolean }[]>();
@@ -257,9 +321,35 @@ export async function GET(req: Request) {
 
       const upcoming = teamUpcomingFixtures.get(el.team) || [];
       const upcomingDiffs = upcoming.filter((f) => f.difficulty > 0).map((f) => f.difficulty);
-      const { verdict, reasons } = classifyPlayer(el, xPts, upcomingDiffs);
+      const { verdict, reasons } = classifyPlayer(el, xPts, upcomingDiffs, el.minutes);
 
       const ownership = parseFloat(el.selected_by_percent || "0");
+
+      // Determine stats source: season totals or last 5 aggregated
+      const useLast5 = range === "last5" && last5Map?.has(el.id);
+      const s = useLast5 ? last5Map!.get(el.id)! : null;
+
+      const mins = useLast5 ? s!.minutes : (el.minutes as number);
+      const starts = useLast5 ? s!.starts : (el.starts as number);
+
+      // Skip players with < 45 mins in selected range
+      if (mins < 45) continue;
+
+      const xG = useLast5 ? s!.expected_goals : parseFloat(el.expected_goals || "0");
+      const xA = useLast5 ? s!.expected_assists : parseFloat(el.expected_assists || "0");
+      const xGI = useLast5 ? s!.expected_goal_involvements : parseFloat(el.expected_goal_involvements || "0");
+      const xGC = useLast5 ? s!.expected_goals_conceded : parseFloat(el.expected_goals_conceded || "0");
+      const goals = useLast5 ? s!.goals_scored : el.goals_scored;
+      const assists = useLast5 ? s!.assists : el.assists;
+      const cs = useLast5 ? s!.clean_sheets : el.clean_sheets;
+      const gc = useLast5 ? s!.goals_conceded : el.goals_conceded;
+      const saves = useLast5 ? s!.saves : (el.saves ?? 0);
+      const bps = useLast5 ? s!.bps : (el.bps ?? 0);
+      const bonus = useLast5 ? s!.bonus : el.bonus;
+      const creativity = useLast5 ? s!.creativity : parseFloat(el.creativity || "0");
+      const totalPts = useLast5 ? s!.total_points : el.total_points;
+      const pensSaved = useLast5 ? s!.penalties_saved : (el.penalties_saved ?? 0);
+      const dc = useLast5 ? 0 : (el.defensive_contribution ?? 0); // DC not in live data
 
       analyticsPlayers.push({
         id: el.id,
@@ -270,34 +360,29 @@ export async function GET(req: Request) {
         position: posLabels[el.element_type] || "???",
         positionId: el.element_type,
         price: el.now_cost / 10,
-        appearances: el.starts,
-        goals: el.goals_scored,
-        assists: el.assists,
-        cleanSheets: el.clean_sheets,
-        goalsConceded: el.goals_conceded,
-        totalPoints: el.total_points,
+        minutes: mins,
+        starts,
+        totalPoints: totalPts,
         form: el.form,
         ownership: el.selected_by_percent,
         status: el.status,
         chanceOfPlaying: el.chance_of_playing_next_round,
-        xG: Math.round(parseFloat(el.expected_goals || "0") * 100) / 100,
-        xA: Math.round(parseFloat(el.expected_assists || "0") * 100) / 100,
-        xGI: Math.round(parseFloat(el.expected_goal_involvements || "0") * 100) / 100,
-        xGC: Math.round(parseFloat(el.expected_goals_conceded || "0") * 100) / 100,
+        // Per-90 stats
+        xGp90: p90(xG, mins),
+        goalsp90: p90(goals, mins),
+        xAp90: p90(xA, mins),
+        assistsp90: p90(assists, mins),
+        xGIp90: p90(xGI, mins),
+        xGCp90: p90(xGC, mins),
+        kpP90: p90(creativity, mins),   // Key Passes proxy (FPL Creativity / 90)
+        bpsP90: p90(bps, mins),         // BPS per 90
+        dcP90: p90(dc, mins),           // Defensive Contribution per 90
+        csp90: p90(cs, mins),           // Clean sheets per 90
+        gcp90: p90(gc, mins),           // Goals conceded per 90
+        svP90: p90(saves, mins),        // Saves per 90
+        penaltiesSaved: pensSaved,
+        bonus,
         xPts: Math.round(xPts * 10) / 10,
-        threat: Math.round(parseFloat(el.threat || "0") * 10) / 10,
-        creativity: Math.round(parseFloat(el.creativity || "0") * 10) / 10,
-        influence: Math.round(parseFloat(el.influence || "0") * 10) / 10,
-        ictIndex: Math.round(parseFloat(el.ict_index || "0") * 10) / 10,
-        defensiveContribution: Math.round((el.defensive_contribution ?? 0) * 10) / 10,
-        defensiveContributionPer90: Math.round((el.defensive_contribution_per_90 ?? 0) * 100) / 100,
-        cleanSheetsPer90: Math.round((el.clean_sheets_per_90 ?? 0) * 100) / 100,
-        goalsConcededPer90: Math.round((el.goals_conceded_per_90 ?? 0) * 100) / 100,
-        saves: el.saves ?? 0,
-        savesPer90: Math.round((el.saves_per_90 ?? 0) * 100) / 100,
-        penaltiesSaved: el.penalties_saved ?? 0,
-        bps: el.bps ?? 0,
-        bonus: el.bonus,
         verdict,
         verdictReasons: reasons,
         isDifferential: ownership < 10,
@@ -317,6 +402,7 @@ export async function GET(req: Request) {
       targetGW,
       upcomingGWs,
       squadIds: Array.from(squadIds),
+      range,
     });
   } catch (err: unknown) {
     console.error("Analytics API error:", err);

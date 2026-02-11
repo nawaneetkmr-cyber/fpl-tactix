@@ -20,34 +20,29 @@ export interface AnalyticsPlayer {
   position: string;
   positionId: number;
   price: number;
-  appearances: number;
-  goals: number;
-  assists: number;
-  cleanSheets: number;
-  goalsConceded: number;
+  minutes: number;
+  starts: number;
   totalPoints: number;
   form: string;
   ownership: string;
   status: string;
   chanceOfPlaying: number | null;
-  xG: number;
-  xA: number;
-  xGI: number;
-  xGC: number;
-  xPts: number;
-  threat: number;
-  creativity: number;
-  influence: number;
-  ictIndex: number;
-  defensiveContribution: number;
-  defensiveContributionPer90: number;
-  cleanSheetsPer90: number;
-  goalsConcededPer90: number;
-  saves: number;
-  savesPer90: number;
+  // Per-90 stats
+  xGp90: number;
+  goalsp90: number;
+  xAp90: number;
+  assistsp90: number;
+  xGIp90: number;
+  xGCp90: number;
+  kpP90: number;   // Key Passes (creativity per 90)
+  bpsP90: number;  // BPS per 90
+  dcP90: number;   // Defensive Contribution per 90
+  csp90: number;   // Clean sheets per 90
+  gcp90: number;   // Goals conceded per 90
+  svP90: number;   // Saves per 90
   penaltiesSaved: number;
-  bps: number;
   bonus: number;
+  xPts: number;
   verdict: "KEEP" | "MONITOR" | "SELL";
   verdictReasons: string[];
   isDifferential: boolean;
@@ -65,39 +60,38 @@ interface ColDef {
   key: SortKey;
   label: string;
   title?: string;
-  color?: string;
   getValue: (p: AnalyticsPlayer) => string | number;
   getClass?: string;
 }
 
 function getColumnsForPosition(positionId: number): ColDef[] {
   const common: ColDef[] = [
-    { key: "price", label: "\u00A3", getValue: (p) => p.price.toFixed(1), getClass: "text-slate-200" },
-    { key: "appearances", label: "App", getValue: (p) => p.appearances, getClass: "text-slate-400" },
+    { key: "price", label: "£", getValue: (p) => p.price.toFixed(1), getClass: "text-slate-200" },
+    { key: "starts", label: "St", title: "Starts", getValue: (p) => p.starts, getClass: "text-slate-400" },
   ];
 
   const attacking: ColDef[] = [
-    { key: "xG", label: "xG", getValue: (p) => p.xG.toFixed(2), getClass: "text-cyan-400" },
-    { key: "goals", label: "G", getValue: (p) => p.goals, getClass: "text-white font-semibold" },
-    { key: "xA", label: "xA", getValue: (p) => p.xA.toFixed(2), getClass: "text-cyan-400" },
-    { key: "assists", label: "A", getValue: (p) => p.assists, getClass: "text-white font-semibold" },
+    { key: "xGp90", label: "xG/90", title: "Expected Goals per 90 min", getValue: (p) => p.xGp90.toFixed(2), getClass: "text-cyan-400" },
+    { key: "goalsp90", label: "G/90", title: "Goals per 90 min", getValue: (p) => p.goalsp90.toFixed(2), getClass: "text-white font-semibold" },
+    { key: "xAp90", label: "xA/90", title: "Expected Assists per 90 min", getValue: (p) => p.xAp90.toFixed(2), getClass: "text-cyan-400" },
+    { key: "assistsp90", label: "A/90", title: "Assists per 90 min", getValue: (p) => p.assistsp90.toFixed(2), getClass: "text-white font-semibold" },
   ];
 
   const process: ColDef[] = [
-    { key: "threat", label: "Thr", title: "Threat (shot involvement)", getValue: (p) => p.threat, getClass: "text-orange-300" },
-    { key: "creativity", label: "Cre", title: "Creativity (chance creation)", getValue: (p) => p.creativity, getClass: "text-violet-300" },
+    { key: "kpP90", label: "KP/90", title: "Key Passes per 90 (FPL Creativity score)", getValue: (p) => p.kpP90.toFixed(1), getClass: "text-violet-300" },
+    { key: "bpsP90", label: "BPS/90", title: "Bonus Points System score per 90", getValue: (p) => p.bpsP90.toFixed(1), getClass: "text-yellow-300" },
   ];
 
   const defensive: ColDef[] = [
-    { key: "defensiveContribution", label: "DC", title: "Defensive Contribution", getValue: (p) => p.defensiveContribution, getClass: "text-blue-300" },
-    { key: "goalsConceded", label: "GC", title: "Goals Conceded", getValue: (p) => p.goalsConceded, getClass: "text-red-300" },
-    { key: "cleanSheets", label: "CS", title: "Clean Sheets", getValue: (p) => p.cleanSheets, getClass: "text-emerald-300" },
-    { key: "xGC", label: "xGC", title: "Expected Goals Conceded", getValue: (p) => p.xGC.toFixed(2), getClass: "text-red-300" },
+    { key: "dcP90", label: "DC/90", title: "Defensive Contribution per 90", getValue: (p) => p.dcP90.toFixed(2), getClass: "text-blue-300" },
+    { key: "gcp90", label: "GC/90", title: "Goals Conceded per 90", getValue: (p) => p.gcp90.toFixed(2), getClass: "text-red-300" },
+    { key: "csp90", label: "CS/90", title: "Clean Sheets per 90", getValue: (p) => p.csp90.toFixed(2), getClass: "text-emerald-300" },
+    { key: "xGCp90", label: "xGC/90", title: "Expected Goals Conceded per 90", getValue: (p) => p.xGCp90.toFixed(2), getClass: "text-red-300" },
   ];
 
   const tail: ColDef[] = [
     { key: "ownership", label: "EO%", title: "Effective Ownership %", getValue: (p) => parseFloat(p.ownership || "0").toFixed(1) + "%", getClass: "text-amber-300" },
-    { key: "xPts", label: "xPts", getValue: (p) => p.xPts.toFixed(1), getClass: "text-emerald-400 font-bold" },
+    { key: "xPts", label: "xPts", title: "Expected Points (next GW)", getValue: (p) => p.xPts.toFixed(1), getClass: "text-emerald-400 font-bold" },
     { key: "totalPoints", label: "Pts", getValue: (p) => p.totalPoints, getClass: "text-white font-semibold" },
   ];
 
@@ -105,10 +99,10 @@ function getColumnsForPosition(positionId: number): ColDef[] {
     case 1: // GKP
       return [
         ...common,
-        { key: "saves", label: "Sv", title: "Saves", getValue: (p) => p.saves, getClass: "text-sky-300" },
-        { key: "savesPer90", label: "Sv/90", title: "Saves per 90", getValue: (p) => p.savesPer90.toFixed(1), getClass: "text-sky-300" },
+        { key: "svP90", label: "Sv/90", title: "Saves per 90", getValue: (p) => p.svP90.toFixed(1), getClass: "text-sky-300" },
         { key: "penaltiesSaved", label: "PS", title: "Penalties Saved", getValue: (p) => p.penaltiesSaved, getClass: "text-emerald-300" },
         ...defensive,
+        { key: "bpsP90", label: "BPS/90", title: "BPS per 90", getValue: (p) => p.bpsP90.toFixed(1), getClass: "text-yellow-300" },
         ...tail,
       ];
     case 2: // DEF
@@ -133,7 +127,7 @@ function getColumnsForPosition(positionId: number): ColDef[] {
         ...common,
         ...attacking,
         ...process,
-        { key: "xGI", label: "xGI", title: "Expected Goal Involvements", getValue: (p) => p.xGI.toFixed(2), getClass: "text-cyan-300" },
+        { key: "xGIp90", label: "xGI/90", title: "Expected Goal Involvements per 90", getValue: (p) => p.xGIp90.toFixed(2), getClass: "text-cyan-300" },
         { key: "bonus", label: "Bon", title: "Bonus Points", getValue: (p) => p.bonus, getClass: "text-yellow-300" },
         ...tail,
       ];
@@ -145,27 +139,24 @@ function getNumericValue(p: AnalyticsPlayer, key: string): number {
     case "xPts": return p.xPts;
     case "totalPoints": return p.totalPoints;
     case "price": return p.price;
-    case "xG": return p.xG;
-    case "xA": return p.xA;
-    case "goals": return p.goals;
-    case "assists": return p.assists;
-    case "form": return parseFloat(p.form || "0");
-    case "ownership": return parseFloat(p.ownership || "0");
-    case "threat": return p.threat;
-    case "creativity": return p.creativity;
-    case "influence": return p.influence;
-    case "ictIndex": return p.ictIndex;
-    case "defensiveContribution": return p.defensiveContribution;
-    case "goalsConceded": return p.goalsConceded;
-    case "cleanSheets": return p.cleanSheets;
-    case "xGC": return p.xGC;
-    case "xGI": return p.xGI;
-    case "saves": return p.saves;
-    case "savesPer90": return p.savesPer90;
+    case "starts": return p.starts;
+    case "minutes": return p.minutes;
+    case "xGp90": return p.xGp90;
+    case "goalsp90": return p.goalsp90;
+    case "xAp90": return p.xAp90;
+    case "assistsp90": return p.assistsp90;
+    case "xGIp90": return p.xGIp90;
+    case "xGCp90": return p.xGCp90;
+    case "kpP90": return p.kpP90;
+    case "bpsP90": return p.bpsP90;
+    case "dcP90": return p.dcP90;
+    case "csp90": return p.csp90;
+    case "gcp90": return p.gcp90;
+    case "svP90": return p.svP90;
     case "penaltiesSaved": return p.penaltiesSaved;
     case "bonus": return p.bonus;
-    case "bps": return p.bps;
-    case "appearances": return p.appearances;
+    case "form": return parseFloat(p.form || "0");
+    case "ownership": return parseFloat(p.ownership || "0");
     default: return 0;
   }
 }
@@ -177,11 +168,15 @@ export default function AnalyticsTable({
   upcomingGWs,
   squadIds,
   positionId,
+  range = "season",
+  onRangeChange,
 }: {
   players: AnalyticsPlayer[];
   upcomingGWs: number[];
   squadIds: Set<number>;
   positionId: number;
+  range?: "season" | "last5";
+  onRangeChange?: (range: "season" | "last5") => void;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("xPts");
   const [sortAsc, setSortAsc] = useState(false);
@@ -252,7 +247,33 @@ export default function AnalyticsTable({
             My Squad
           </label>
         )}
-        <span className="text-slate-600 text-xs ml-auto">{filtered.length} players</span>
+
+        {/* Range toggle: Season vs Last 5 */}
+        {onRangeChange && (
+          <div className="flex gap-0.5 bg-[#0d1117] rounded-lg p-0.5 ml-1">
+            <button
+              onClick={() => onRangeChange("season")}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition-colors ${
+                range === "season" ? "bg-purple-600 text-white" : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              Season
+            </button>
+            <button
+              onClick={() => onRangeChange("last5")}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition-colors ${
+                range === "last5" ? "bg-purple-600 text-white" : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              Last 5
+            </button>
+          </div>
+        )}
+
+        <span className="text-slate-600 text-xs ml-auto">
+          {filtered.length} players
+          {range === "last5" && <span className="text-purple-400 ml-1">(Last 5 GWs)</span>}
+        </span>
       </div>
 
       {/* Tables by verdict */}
@@ -404,19 +425,20 @@ function TableKey({ positionId }: { positionId: number }) {
         <span className="flex items-center gap-1.5"><span className="at-icon bg-indigo-600">S</span> In your squad</span>
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-slate-500">
-        <span><strong className="text-orange-300">Thr</strong> = Threat (shot proxy)</span>
-        <span><strong className="text-violet-300">Cre</strong> = Creativity (chance creation)</span>
+        <span className="font-medium text-slate-400">All stats are per 90 minutes</span>
+        <span><strong className="text-violet-300">KP/90</strong> = Key Passes (chance creation)</span>
+        <span><strong className="text-yellow-300">BPS/90</strong> = Bonus Point System score</span>
         <span><strong className="text-amber-300">EO%</strong> = Effective Ownership</span>
         {(positionId === 1 || positionId === 2 || positionId === 3) && (
           <>
-            <span><strong className="text-blue-300">DC</strong> = Defensive Contribution</span>
-            <span><strong className="text-red-300">GC</strong> = Goals Conceded</span>
-            <span><strong className="text-emerald-300">CS</strong> = Clean Sheets</span>
-            <span><strong className="text-red-300">xGC</strong> = Expected Goals Conceded</span>
+            <span><strong className="text-blue-300">DC/90</strong> = Defensive Contribution</span>
+            <span><strong className="text-red-300">GC/90</strong> = Goals Conceded</span>
+            <span><strong className="text-emerald-300">CS/90</strong> = Clean Sheets</span>
+            <span><strong className="text-red-300">xGC/90</strong> = Expected Goals Conceded</span>
           </>
         )}
         {positionId === 4 && (
-          <span><strong className="text-cyan-300">xGI</strong> = Expected Goal Involvements</span>
+          <span><strong className="text-cyan-300">xGI/90</strong> = Expected Goal Involvements</span>
         )}
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
