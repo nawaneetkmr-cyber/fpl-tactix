@@ -60,6 +60,17 @@ export default function RootLayout({
             >
               Dashboard
             </a>
+            <a
+              href="/analytics"
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: "var(--muted)",
+                textDecoration: "none",
+              }}
+            >
+              Analytics
+            </a>
           </div>
         </nav>
         {children}
