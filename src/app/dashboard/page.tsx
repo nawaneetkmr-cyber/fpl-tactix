@@ -189,12 +189,7 @@ function DashboardInner() {
     if (teamId) fetchData(teamId);
   }, [teamId, fetchData]);
 
-  // Auto-refresh every 45 seconds
-  useEffect(() => {
-    if (!teamId) return;
-    const interval = setInterval(() => fetchData(teamId), 45000);
-    return () => clearInterval(interval);
-  }, [teamId, fetchData]);
+
 
   // Fetch bootstrap/fixture data + run transfer brain
   useEffect(() => {
