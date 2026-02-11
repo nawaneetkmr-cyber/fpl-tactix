@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import FixtureDifficultyGrid from "@/components/FixtureDifficultyGrid";
 import PitchView from "@/components/PitchView";
+import AnalyticsTable from "@/components/AnalyticsTable";
+import type { AnalyticsPlayer } from "@/components/AnalyticsTable";
 import {
   buildFixtureDifficultyGrid,
   suggestNextGWCaptain,
@@ -134,6 +136,36 @@ function DashboardInner() {
   >([]);
   const [captainGW, setCaptainGW] = useState<number | null>(null);
 
+  // Analytics section state
+  const [analyticsPlayers, setAnalyticsPlayers] = useState<AnalyticsPlayer[]>([]);
+  const [analyticsUpcomingGWs, setAnalyticsUpcomingGWs] = useState<number[]>([]);
+  const [analyticsSquadIds, setAnalyticsSquadIds] = useState<Set<number>>(new Set());
+  const [analyticsPosition, setAnalyticsPosition] = useState<number>(4);
+  const [analyticsRange, setAnalyticsRange] = useState<"season" | "last5">("season");
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
+  const fetchAnalytics = useCallback(async (pos: number, tid: string, range: string) => {
+    setAnalyticsLoading(true);
+    try {
+      const params = new URLSearchParams({ position: String(pos), range });
+      if (tid) params.set("teamId", tid);
+      const res = await fetch(`/api/fpl/analytics?${params}`);
+      const json = await res.json();
+      if (json.ok) {
+        setAnalyticsPlayers(json.players);
+        setAnalyticsUpcomingGWs(json.upcomingGWs);
+        setAnalyticsSquadIds(new Set(json.squadIds));
+      }
+    } catch { /* silent */ }
+    setAnalyticsLoading(false);
+  }, []);
+
+  // Fetch analytics when position/range changes or data loads
+  useEffect(() => {
+    if (data && !data.error && teamId) {
+      fetchAnalytics(analyticsPosition, teamId, analyticsRange);
+    }
+  }, [data, analyticsPosition, analyticsRange, teamId, fetchAnalytics]);
 
   const fetchData = useCallback(async (id: string) => {
     if (!id) return;
@@ -384,7 +416,7 @@ function DashboardInner() {
   const squadTeamIds = [...new Set(data.picks.map((p) => p.teamId).filter((id) => id > 0))];
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-8 bg-slate-950 min-h-screen">
+    <div className="max-w-[1400px] mx-auto px-4 py-6 space-y-8 bg-slate-950 min-h-screen">
       {/* ===== HEADER ===== */}
       <header className="sticky top-0 z-20 -mx-4 px-4 py-4 bg-slate-950/95 backdrop-blur border-b border-slate-700">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -451,26 +483,62 @@ function DashboardInner() {
         />
       </section>
 
-      {/* ===== ANALYTICS DISCOVERY BANNER ===== */}
-      <section>
-        <a
-          href={`/analytics?teamId=${teamId}`}
-          className="block rounded-xl border border-purple-700/50 bg-gradient-to-r from-purple-900/30 via-indigo-900/20 to-slate-900 p-5 hover:border-purple-500/70 transition-all group"
-        >
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h2 className="text-lg font-bold text-slate-50 group-hover:text-purple-300 transition-colors">
-                Player Analytics
-              </h2>
-              <p className="text-sm text-slate-400 mt-1">
-                Advanced stats: Shots, Key Passes, npxG, xG Chain, EO% — powered by Understat + FPL. KEEP / MONITOR / SELL verdicts for every player.
-              </p>
-            </div>
-            <span className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-semibold group-hover:bg-purple-500 transition-colors whitespace-nowrap">
-              Open Analytics
-            </span>
+      {/* ===== PLAYER ANALYTICS SECTION ===== */}
+      <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-50">Player Analytics</h2>
+            <p className="text-sm text-slate-400 mt-1">
+              Per-90 stats — xG, xA, KP, BPS, DC, CS with KEEP / MONITOR / SELL verdicts
+            </p>
           </div>
-        </a>
+          <a
+            href={`/analytics?teamId=${teamId}`}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs font-medium hover:bg-slate-700 transition-colors border border-slate-700"
+          >
+            Full View &rarr;
+          </a>
+        </div>
+
+        {/* Position tabs */}
+        <div className="flex gap-1 bg-[#111827] rounded-lg p-1 w-fit mb-4">
+          {[
+            { id: 1, label: "Goalkeepers", short: "GKP" },
+            { id: 2, label: "Defenders", short: "DEF" },
+            { id: 3, label: "Midfielders", short: "MID" },
+            { id: 4, label: "Forwards", short: "FWD" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setAnalyticsPosition(tab.id)}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                analyticsPosition === tab.id
+                  ? "bg-purple-600 text-white"
+                  : "text-slate-500 hover:text-slate-300 hover:bg-[#1a2030]"
+              }`}
+            >
+              <span className="hidden sm:inline">{tab.label}</span>
+              <span className="sm:hidden">{tab.short}</span>
+            </button>
+          ))}
+        </div>
+
+        {analyticsLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="spinner" />
+          </div>
+        ) : analyticsPlayers.length > 0 ? (
+          <AnalyticsTable
+            players={analyticsPlayers}
+            upcomingGWs={analyticsUpcomingGWs}
+            squadIds={analyticsSquadIds}
+            positionId={analyticsPosition}
+            range={analyticsRange}
+            onRangeChange={setAnalyticsRange}
+          />
+        ) : (
+          <p className="text-slate-500 py-4">No analytics data available</p>
+        )}
       </section>
 
       {/* ===== SECTION 2: QUICK STATS ===== */}
