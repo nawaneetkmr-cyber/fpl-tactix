@@ -184,6 +184,23 @@ function DashboardInner() {
     setLoading(false);
   }, []);
 
+  // Eagerly fetch bootstrap (teams/elements) in parallel with summary —
+  // PitchView needs team codes for jersey URLs, so don't wait for summary.
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchBootstrapEarly() {
+      try {
+        const res = await fetch("/api/fpl/bootstrap");
+        const bootstrap = await res.json();
+        if (cancelled || !bootstrap.ok) return;
+        setBootstrapElements(bootstrap.elements || []);
+        setBootstrapTeams(bootstrap.teams || []);
+      } catch { /* silent */ }
+    }
+    fetchBootstrapEarly();
+    return () => { cancelled = true; };
+  }, []);
+
   // Initial fetch
   useEffect(() => {
     if (teamId) fetchData(teamId);
@@ -211,9 +228,10 @@ function DashboardInner() {
           return;
         }
 
-        // Store bootstrap data
-        setBootstrapElements(bootstrap.elements || []);
-        setBootstrapTeams(bootstrap.teams || []);
+        // Update bootstrap data (may already be set by early fetch, but
+        // keep in sync in case API data changed between calls)
+        if (bootstrap.elements?.length) setBootstrapElements(bootstrap.elements);
+        if (bootstrap.teams?.length) setBootstrapTeams(bootstrap.teams);
 
         const fixtureData: FixtureDetail[] = (bootstrap.fixtures || [])
           .filter((f: FPLFixture) => f.event != null && f.event > 0)
