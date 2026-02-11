@@ -1,6 +1,14 @@
 "use client";
 
 import Image from "next/image";
+import { useState } from "react";
+
+// Tiny 1x1 shimmer placeholder (avoids layout shift while jersey loads)
+const JERSEY_BLUR =
+  "data:image/svg+xml;base64," +
+  btoa(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" rx="8" fill="#374151"/></svg>'
+  );
 
 // ---------- Types ----------
 
@@ -75,6 +83,7 @@ function PlayerCard({
       : getJerseyUrl(team.code)
     : "/placeholder-jersey.png";
 
+  const [imgError, setImgError] = useState(false);
   const displayPoints = pick.points * (pick.multiplier || 1);
   const ownership = element?.selected_by_percent ?? "0";
   const form = element?.form ?? "0.0";
@@ -96,14 +105,22 @@ function PlayerCard({
             justifyContent: "center",
           }}
         >
-          <Image
-            src={jerseyUrl}
-            alt={pick.webName}
-            width={48}
-            height={48}
-            className="object-contain"
-            unoptimized
-          />
+          {imgError ? (
+            <div className="w-12 h-12 rounded bg-gray-700 flex items-center justify-center text-gray-400 text-lg font-bold">
+              {pick.webName.charAt(0)}
+            </div>
+          ) : (
+            <Image
+              src={jerseyUrl}
+              alt={pick.webName}
+              width={48}
+              height={48}
+              className="object-contain"
+              placeholder="blur"
+              blurDataURL={JERSEY_BLUR}
+              onError={() => setImgError(true)}
+            />
+          )}
         </div>
 
         {/* Captain badge */}
