@@ -81,15 +81,19 @@ function classifyPlayer(
   else if (form >= 4) { score += 1; }
   else if (form < 2) { score -= 2; reasons.push("Poor form"); }
 
-  if (xPts >= 5) { score += 2; reasons.push("High xPts projection"); }
-  else if (xPts >= 3.5) { score += 1; }
+  // xPts is the primary signal — it already accounts for fixture difficulty,
+  // opponent strength, and player quality. Weight it heavily.
+  if (xPts >= 5) { score += 3; reasons.push("High xPts projection"); }
+  else if (xPts >= 3.5) { score += 2; reasons.push("Good xPts projection"); }
+  else if (xPts >= 2) { score += 1; }
   else if (xPts < 2) { score -= 2; reasons.push("Low xPts projection"); }
 
+  // Fixture difficulty is supplementary context (xPts already captures this,
+  // so keep the bonus/penalty small to avoid double-counting)
   if (upcomingDifficulty.length > 0) {
     const avgDiff = upcomingDifficulty.reduce((a, b) => a + b, 0) / upcomingDifficulty.length;
-    if (avgDiff <= 2.5) { score += 2; reasons.push("Great upcoming fixtures"); }
-    else if (avgDiff <= 3) { score += 1; }
-    else if (avgDiff >= 4) { score -= 2; reasons.push("Tough upcoming fixtures"); }
+    if (avgDiff <= 2.5) { score += 1; reasons.push("Great upcoming fixtures"); }
+    else if (avgDiff >= 4.5) { score -= 1; reasons.push("Very tough upcoming fixtures"); }
   }
 
   // Threat/creativity check (FPL process stats)
