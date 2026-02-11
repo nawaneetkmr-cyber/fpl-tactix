@@ -323,3 +323,166 @@ body {
     transform: translateY(0);
   }
 }
+
+/* ---------- Analytics Dashboard ---------- */
+
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.analytics-th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--card-border);
+  background: rgba(15, 23, 42, 0.6);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  user-select: none;
+}
+
+.analytics-th-sortable {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.analytics-th-sortable:hover {
+  color: var(--foreground);
+}
+
+.analytics-th-accent {
+  color: var(--accent);
+}
+
+.analytics-th-fixture {
+  text-align: center;
+  min-width: 72px;
+}
+
+.analytics-th-sticky,
+.analytics-td-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  background: rgba(15, 23, 42, 0.95);
+  min-width: 130px;
+}
+
+.analytics-td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(46, 46, 66, 0.5);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-row {
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+
+.analytics-row:hover {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.analytics-row-squad {
+  background: rgba(139, 92, 246, 0.05);
+}
+
+.analytics-row-squad:hover {
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.analytics-reasons-row {
+  border-bottom: 1px solid rgba(46, 46, 66, 0.5);
+}
+
+/* Player status icons */
+.analytics-icon-diff,
+.analytics-icon-rotation,
+.analytics-icon-maybe,
+.analytics-icon-unavailable,
+.analytics-icon-squad {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.analytics-icon-diff {
+  background: #7c3aed;
+  color: white;
+}
+
+.analytics-icon-rotation {
+  background: #d97706;
+  color: white;
+}
+
+.analytics-icon-maybe {
+  background: #f59e0b;
+  color: #1e1e2e;
+}
+
+.analytics-icon-unavailable {
+  background: #ef4444;
+  color: white;
+}
+
+.analytics-icon-squad {
+  background: #6366f1;
+  color: white;
+}
+
+/* Fixture difficulty rating badges */
+.analytics-fdr {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  min-width: 60px;
+}
+
+.analytics-fdr-blank {
+  color: var(--muted-light);
+  font-size: 11px;
+}
+
+.analytics-fdr-1 {
+  background: #166534;
+  color: #dcfce7;
+}
+
+.analytics-fdr-2 {
+  background: #15803d;
+  color: #dcfce7;
+}
+
+.analytics-fdr-3 {
+  background: #6b7280;
+  color: #e5e7eb;
+}
+
+.analytics-fdr-4 {
+  background: #b91c1c;
+  color: #fecaca;
+}
+
+.analytics-fdr-5 {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
