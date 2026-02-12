@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import FixtureDifficultyGrid from "@/components/FixtureDifficultyGrid";
 import PitchView from "@/components/PitchView";
@@ -72,6 +72,9 @@ interface DashboardData {
   teamName: string;
   playerName: string;
   gameweek: number;
+  isGwFinished?: boolean;
+  isGwCurrent?: boolean;
+  targetGw?: number;
   livePoints: number;
   benchPoints: number;
   captainPoints: number;
@@ -96,7 +99,7 @@ interface BootstrapElement {
   selected_by_percent: string;
   form: string;
   photo: string;
-  now_cost: number;
+  now_cost?: number;
 }
 
 interface BootstrapTeam {
@@ -145,6 +148,10 @@ function DashboardInner() {
   >([]);
   const [captainGW, setCaptainGW] = useState<number | null>(null);
 
+  // Cached bootstrap data from parallel fetch
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bootstrapCacheRef = useRef<any>(null);
+
   // Analytics section state
   const [analyticsPlayers, setAnalyticsPlayers] = useState<AnalyticsPlayer[]>([]);
   const [analyticsUpcomingGWs, setAnalyticsUpcomingGWs] = useState<number[]>([]);
@@ -178,14 +185,29 @@ function DashboardInner() {
   const fetchData = useCallback(async (id: string) => {
     if (!id) return;
     setLoading(true);
+    setFixturesLoading(true);
     try {
-      const res = await fetch(`/api/fpl/summary?teamId=${id}`);
-      const json = await res.json();
+      // Fetch summary and bootstrap in PARALLEL to avoid loading waterfall
+      const [summaryRes, bootstrapRes] = await Promise.all([
+        fetch(`/api/fpl/summary?teamId=${id}`),
+        fetch("/api/fpl/bootstrap"),
+      ]);
+      const json = await summaryRes.json();
+      const bootstrap = await bootstrapRes.json();
+
       if (json.error) {
         setData({ error: json.error } as DashboardData);
       } else {
         setData(json);
         setLastUpdate(new Date());
+      }
+
+      // Process bootstrap data immediately (no second waterfall)
+      if (bootstrap.ok) {
+        setBootstrapElements(bootstrap.elements || []);
+        setBootstrapTeams(bootstrap.teams || []);
+        // Store bootstrap for the useEffect to process fixtures/captain
+        bootstrapCacheRef.current = bootstrap;
       }
     } catch (e) {
       setData({ error: String(e) } as DashboardData);
@@ -200,7 +222,7 @@ function DashboardInner() {
 
 
 
-  // Fetch bootstrap/fixture data + run transfer brain
+  // Process bootstrap fixture data + captain suggestions
   useEffect(() => {
     if (!data || data.error) return;
 
@@ -208,21 +230,25 @@ function DashboardInner() {
     const gameweek = data.gameweek;
     const picks = data.picks;
 
-    async function fetchFixtureData() {
+    async function processFixtureData() {
       try {
-        const res = await fetch("/api/fpl/bootstrap");
-        const bootstrap = await res.json();
+        // Use cached bootstrap from parallel fetch, or fetch if not available
+        let bootstrap = bootstrapCacheRef.current;
+        if (!bootstrap) {
+          const res = await fetch("/api/fpl/bootstrap");
+          bootstrap = await res.json();
+          if (bootstrap.ok) {
+            setBootstrapElements(bootstrap.elements || []);
+            setBootstrapTeams(bootstrap.teams || []);
+          }
+        }
 
         if (cancelled) return;
 
-        if (!bootstrap.ok) {
+        if (!bootstrap?.ok) {
           setFixturesLoading(false);
           return;
         }
-
-        // Store bootstrap data
-        setBootstrapElements(bootstrap.elements || []);
-        setBootstrapTeams(bootstrap.teams || []);
 
         const fixtureData: FixtureDetail[] = (bootstrap.fixtures || [])
           .filter((f: FPLFixture) => f.event != null && f.event > 0)
@@ -327,7 +353,7 @@ function DashboardInner() {
       if (!cancelled) setFixturesLoading(false);
     }
 
-    fetchFixtureData();
+    processFixtureData();
     return () => {
       cancelled = true;
     };
@@ -429,7 +455,9 @@ function DashboardInner() {
           </div>
           <div className="flex items-center gap-6 text-sm">
             <div className="text-center">
-              <div className="text-slate-400">GW{data.gameweek}</div>
+              <div className="text-slate-400">
+                {data.isGwFinished ? "" : data.isGwCurrent ? "Live " : ""}GW{data.gameweek}
+              </div>
               <div className="text-xl font-bold text-emerald-400">{data.livePoints}</div>
             </div>
             <div className="text-center">
@@ -476,6 +504,7 @@ function DashboardInner() {
             selected_by_percent: e.selected_by_percent,
             form: e.form,
             photo: e.photo || "",
+            now_cost: e.now_cost,
           }))}
           teams={bootstrapTeams.map((t) => ({
             id: t.id,
@@ -612,9 +641,12 @@ function DashboardInner() {
       <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
         <h2 className="text-2xl font-bold text-slate-50 mb-2">
           Transfer Brain
+          <span className="text-base font-normal text-slate-500 ml-2">
+            GW{data.targetGw ?? data.gameweek}
+          </span>
         </h2>
         <p className="text-sm text-slate-400 mb-6">
-          MILP-optimized transfers with budget, formation &amp; hit-cost constraints
+          Optimized lineup &amp; transfers for {data.targetGw === data.gameweek ? "the current" : "the upcoming"} gameweek
         </p>
 
         {!data.milpOptimization ? (
@@ -750,7 +782,10 @@ function DashboardInner() {
       {/* ===== SECTION 4: CAPTAIN PICK ===== */}
       <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
         <h2 className="text-2xl font-bold text-slate-50 mb-6">
-          Captain Pick (GW{captainGW ?? data.gameweek})
+          Captain Pick
+          <span className="text-base font-normal text-slate-500 ml-2">
+            GW{captainGW ?? data.gameweek}
+          </span>
         </h2>
         {fixturesLoading ? (
           <div className="flex justify-center py-8">
