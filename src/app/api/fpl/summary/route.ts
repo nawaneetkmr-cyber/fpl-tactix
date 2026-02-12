@@ -57,16 +57,16 @@ export async function GET(req: Request) {
         (e: { is_next: boolean }) => e.is_next
       );
       if (currentEvent && !currentEvent.finished) {
+        // GW is in progress — show it
+        gw = currentEvent.id;
+      } else if (currentEvent && currentEvent.finished) {
+        // Current GW is finished — show it (user wants to see their completed GW score)
         gw = currentEvent.id;
       } else if (nextEvent) {
-        if (latestHistoryEvent && nextEvent.id > latestHistoryEvent) {
-          gw = latestHistoryEvent;
-        } else {
-          gw = nextEvent.id;
-        }
-      } else if (currentEvent) {
-        gw = currentEvent.id;
+        // Between gameweeks — show the next upcoming GW
+        gw = nextEvent.id;
       } else {
+        // Fallback: highest finished event
         const finishedEvents = (bootstrap.events || []).filter(
           (e: { finished: boolean }) => e.finished
         );
@@ -131,11 +131,17 @@ export async function GET(req: Request) {
 
     let milpOptimization = null;
     try {
-      // Determine next GW for projections
+      // Determine target GW for projections
+      // If the current GW is still in progress (not finished), project for it
+      // so the "Optimized XI Captain" reflects the active GW (important for DGWs).
+      // Only project for next GW if the current one is fully finished.
+      const gwEvent = bootstrap.events?.find(
+        (e: { id: number }) => e.id === gw
+      );
       const nextEvent = bootstrap.events?.find(
         (e: { is_next: boolean }) => e.is_next
       );
-      const targetGw = nextEvent?.id ?? gw + 1;
+      const targetGw = gwEvent && !gwEvent.finished ? gw : (nextEvent?.id ?? gw + 1);
 
       // Build team short_name lookup
       const teamShortNames: Record<number, string> = {};
@@ -255,10 +261,47 @@ export async function GET(req: Request) {
       captainIdForSafety
     );
 
+    // Determine GW state for the UI
+    const gwEventFinal = bootstrap.events?.find(
+      (e: { id: number }) => e.id === gw
+    );
+    const isGwFinished = gwEventFinal?.finished ?? false;
+    const isGwCurrent = gwEventFinal?.is_current ?? false;
+
+    // Active chip for this GW (from picks endpoint)
+    const activeChip: string | null = picksData.active_chip ?? null;
+
+    // Extract bank & free transfers for planner
+    const bankValue = (picksData.entry_history?.bank ?? 0) / 10;
+    let freeTransfersValue = 1;
+    if (latestHistory && latestHistory.length >= 2) {
+      const sortedH = [...latestHistory].sort(
+        (a: { event: number }, b: { event: number }) => b.event - a.event
+      );
+      const prevGwH = sortedH.find(
+        (h: { event: number }) => h.event === gw - 1
+      );
+      if (prevGwH && prevGwH.event_transfers === 0) {
+        freeTransfersValue = 2;
+      }
+    }
+
+    // Chips used
+    const chipsUsed: string[] = (latestHistory || [])
+      .filter((h: { active_chip: string | null }) => h.active_chip)
+      .map((h: { active_chip: string }) => h.active_chip);
+
     return Response.json({
       teamName: entry.name,
       playerName: `${entry.player_first_name} ${entry.player_last_name}`,
       gameweek: gw,
+      isGwFinished,
+      isGwCurrent,
+      targetGw: (() => {
+        const gwEv = bootstrap.events?.find((e: { id: number }) => e.id === gw);
+        const nxtEv = bootstrap.events?.find((e: { is_next: boolean }) => e.is_next);
+        return gwEv && !gwEv.finished ? gw : (nxtEv?.id ?? gw + 1);
+      })(),
       livePoints,
       benchPoints,
       captainPoints,
@@ -274,6 +317,10 @@ export async function GET(req: Request) {
       liveElements,
       elements,
       teams,
+      bank: bankValue,
+      freeTransfers: freeTransfersValue,
+      chipsUsed,
+      activeChip,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

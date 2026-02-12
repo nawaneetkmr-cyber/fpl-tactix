@@ -1,7 +1,5 @@
 "use client";
 
-import Image from "next/image";
-
 // ---------- Types ----------
 
 interface EnrichedPick {
@@ -40,18 +38,16 @@ interface PitchViewProps {
   picks: EnrichedPick[];
   elements: BootstrapElement[];
   teams: FPLTeam[];
+  activeChip?: string | null;
 }
 
 // ---------- Jersey URL Builder ----------
 
 function getJerseyUrl(teamCode: number): string {
-  // FPL serves jerseys at this URL pattern
-  // shirt_TYPE_NUMBER.webp where TYPE is the team code
   return `https://fantasy.premierleague.com/dist/img/shirts/standard/shirt_${teamCode}-110.webp`;
 }
 
 function getGKJerseyUrl(teamCode: number): string {
-  // Goalkeeper jerseys have different pattern
   return `https://fantasy.premierleague.com/dist/img/shirts/standard/shirt_${teamCode}_1-110.webp`;
 }
 
@@ -62,18 +58,20 @@ function PlayerCard({
   element,
   team,
   isBench = false,
+  chipLabel,
 }: {
   pick: EnrichedPick;
   element?: BootstrapElement;
   team?: FPLTeam;
   isBench?: boolean;
+  chipLabel?: string | null;
 }) {
   const isGK = pick.elementType === 1;
   const jerseyUrl = team
     ? isGK
       ? getGKJerseyUrl(team.code)
       : getJerseyUrl(team.code)
-    : "/placeholder-jersey.png";
+    : null;
 
   const displayPoints = pick.points * (pick.multiplier || 1);
   const ownership = element?.selected_by_percent ?? "0";
@@ -96,14 +94,21 @@ function PlayerCard({
             justifyContent: "center",
           }}
         >
-          <Image
-            src={jerseyUrl}
-            alt={pick.webName}
-            width={48}
-            height={48}
-            className="object-contain"
-            unoptimized
-          />
+          {jerseyUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={jerseyUrl}
+              alt={pick.webName}
+              width={48}
+              height={48}
+              loading="eager"
+              style={{ objectFit: "contain" }}
+            />
+          ) : (
+            <div className="w-12 h-12 rounded bg-gray-700 flex items-center justify-center text-gray-500 text-xs">
+              ?
+            </div>
+          )}
         </div>
 
         {/* Captain badge */}
@@ -112,7 +117,7 @@ function PlayerCard({
             className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-yellow-500 flex items-center justify-center text-xs font-bold text-black"
             title="Captain"
           >
-            ★
+            {chipLabel === "3xc" ? "3x" : "\u2605"}
           </div>
         )}
 
@@ -165,7 +170,7 @@ function PlayerCard({
 
 // ---------- Main PitchView Component ----------
 
-export default function PitchView({ picks, elements, teams }: PitchViewProps) {
+export default function PitchView({ picks, elements, teams, activeChip }: PitchViewProps) {
   // Create lookup maps
   const elementMap = new Map(elements.map((e) => [e.id, e]));
   const teamMap = new Map(teams.map((t) => [t.id, t]));
@@ -180,8 +185,16 @@ export default function PitchView({ picks, elements, teams }: PitchViewProps) {
   const mid = starters.filter((p) => p.elementType === 3);
   const fwd = starters.filter((p) => p.elementType === 4);
 
+  // Chip label
+  const chipLabels: Record<string, string> = {
+    "3xc": "Triple Captain Active",
+    bboost: "Bench Boost Active",
+    freehit: "Free Hit Active",
+    wildcard: "Wildcard Active",
+  };
+
   // Render a row of players
-  const renderRow = (players: EnrichedPick[], rowLabel: string) => (
+  const renderRow = (players: EnrichedPick[]) => (
     <div className="flex justify-center gap-2 py-3">
       {players.map((pick) => (
         <PlayerCard
@@ -189,6 +202,7 @@ export default function PitchView({ picks, elements, teams }: PitchViewProps) {
           pick={pick}
           element={elementMap.get(pick.element)}
           team={teamMap.get(pick.teamId)}
+          chipLabel={activeChip}
         />
       ))}
     </div>
@@ -196,6 +210,13 @@ export default function PitchView({ picks, elements, teams }: PitchViewProps) {
 
   return (
     <div className="w-full">
+      {/* Active chip banner */}
+      {activeChip && chipLabels[activeChip] && (
+        <div className="flex items-center justify-center gap-2 py-2 px-4 bg-gradient-to-r from-purple-900/60 to-purple-800/30 border-b border-purple-700/50">
+          <span className="text-purple-300 text-sm font-semibold">{chipLabels[activeChip]}</span>
+        </div>
+      )}
+
       {/* Pitch Container */}
       <div
         className="relative rounded-xl overflow-hidden"
@@ -220,20 +241,16 @@ export default function PitchView({ picks, elements, teams }: PitchViewProps) {
       >
         {/* Pitch markings */}
         <div className="absolute inset-0 pointer-events-none">
-          {/* Center line */}
           <div
             className="absolute left-0 right-0 h-px bg-white/20"
             style={{ top: "50%" }}
           />
-          {/* Center circle */}
           <div
             className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border border-white/20"
           />
-          {/* Top penalty box */}
           <div
             className="absolute left-1/2 -translate-x-1/2 top-0 w-48 h-16 border-b border-l border-r border-white/20"
           />
-          {/* Bottom penalty box */}
           <div
             className="absolute left-1/2 -translate-x-1/2 bottom-0 w-48 h-16 border-t border-l border-r border-white/20"
           />
@@ -241,24 +258,28 @@ export default function PitchView({ picks, elements, teams }: PitchViewProps) {
 
         {/* Player positions */}
         <div className="relative z-10 flex flex-col justify-between py-4" style={{ minHeight: 420 }}>
-          {/* Forwards (top) */}
-          {fwd.length > 0 && renderRow(fwd, "FWD")}
-
-          {/* Midfielders */}
-          {mid.length > 0 && renderRow(mid, "MID")}
-
-          {/* Defenders */}
-          {def.length > 0 && renderRow(def, "DEF")}
-
-          {/* Goalkeeper (bottom) */}
-          {gkp.length > 0 && renderRow(gkp, "GKP")}
+          {fwd.length > 0 && renderRow(fwd)}
+          {mid.length > 0 && renderRow(mid)}
+          {def.length > 0 && renderRow(def)}
+          {gkp.length > 0 && renderRow(gkp)}
         </div>
       </div>
 
       {/* Bench Section */}
-      <div className="mt-4 p-4 rounded-xl bg-gray-800/50 border border-gray-700">
-        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-          Bench
+      <div className={`mt-4 p-4 rounded-xl border ${
+        activeChip === "bboost"
+          ? "bg-purple-900/30 border-purple-700"
+          : "bg-gray-800/50 border-gray-700"
+      }`}>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            Bench
+          </span>
+          {activeChip === "bboost" && (
+            <span className="text-[10px] font-semibold text-purple-300 bg-purple-800/60 px-1.5 py-0.5 rounded">
+              BENCH BOOST
+            </span>
+          )}
         </div>
         <div className="flex justify-center gap-4">
           {bench.map((pick) => (
@@ -267,7 +288,8 @@ export default function PitchView({ picks, elements, teams }: PitchViewProps) {
               pick={pick}
               element={elementMap.get(pick.element)}
               team={teamMap.get(pick.teamId)}
-              isBench
+              isBench={activeChip !== "bboost"}
+              chipLabel={activeChip}
             />
           ))}
         </div>
