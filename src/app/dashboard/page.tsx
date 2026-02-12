@@ -1027,11 +1027,11 @@ function DashboardInner() {
         <h2 className="text-2xl font-bold text-slate-50 mb-2">
           Transfer Brain
           <span className="text-base font-normal text-slate-500 ml-2">
-            GW{data.targetGw ?? data.gameweek}
+            GW{data.targetGw ?? data.gameweek + 1}
           </span>
         </h2>
         <p className="text-sm text-slate-400 mb-6">
-          Optimized lineup &amp; transfers for {data.targetGw === data.gameweek ? "the current" : "the upcoming"} gameweek
+          Multi-GW optimized transfers — blends next 3 GWs to avoid one-week punts
         </p>
 
         {!data.milpOptimization ? (
