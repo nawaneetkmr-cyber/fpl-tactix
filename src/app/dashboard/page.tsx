@@ -194,6 +194,7 @@ function DashboardInner() {
     netXPts: number;
   } | null>(null);
   const [simulating, setSimulating] = useState(false);
+  const simulationResultRef = useRef<HTMLDivElement>(null);
 
   const fetchAnalytics = useCallback(async (pos: number, tid: string) => {
     setAnalyticsLoading(true);
@@ -509,196 +510,289 @@ function DashboardInner() {
   function runSimulation() {
     if (!data || plannerProjections.length === 0 || !plannerNextGW) return;
     setSimulating(true);
+    setSimulationResult(null);
 
-    const squad = getPlannerSquad();
-    const hitCost = getPlannerHitCost();
+    // Use setTimeout so the AI animation plays before results appear
+    setTimeout(() => {
+      const squad = getPlannerSquad();
+      const hitCost = getPlannerHitCost();
 
-    // Recompute projections for the effective squad
-    const squadIds = squad.map((p) => p.element);
-    const effectiveProjections = calculatePlayerProjections(
-      plannerAllPlayers.filter((p) => squadIds.includes(p.id)),
-      plannerTeams,
-      plannerFixtures,
-      plannerNextGW
-    );
-    const projMap = new Map(effectiveProjections.map((p) => [p.player_id, p]));
-
-    const starters = squad.filter((p) => p.position <= 11);
-    const bench = squad.filter((p) => p.position > 11);
-
-    const starterProjs = starters
-      .map((pick) => ({ pick, proj: projMap.get(pick.element) }))
-      .filter((x) => x.proj);
-    const benchProjs = bench
-      .map((pick) => ({ pick, proj: projMap.get(pick.element) }))
-      .filter((x) => x.proj);
-
-    const startingXPts = starterProjs.reduce((s, x) => s + (x.proj?.expected_points ?? 0), 0);
-    const benchXPts = benchProjs.reduce((s, x) => s + (x.proj?.expected_points ?? 0), 0);
-
-    // Captain: use planner captain if set, else best xPts among starters
-    let captainEl: typeof starterProjs[0] | undefined;
-    if (plannerCaptainId) {
-      captainEl = starterProjs.find((x) => x.pick.element === plannerCaptainId);
-    }
-    if (!captainEl) {
-      captainEl = starterProjs.reduce(
-        (best, x) => ((x.proj?.expected_points ?? 0) > (best.proj?.expected_points ?? 0) ? x : best),
-        starterProjs[0]
+      // Recompute projections for the effective squad
+      const squadIds = squad.map((p) => p.element);
+      const effectiveProjections = calculatePlayerProjections(
+        plannerAllPlayers.filter((p) => squadIds.includes(p.id)),
+        plannerTeams,
+        plannerFixtures,
+        plannerNextGW!
       );
-    }
-    const captainXPts = captainEl?.proj?.expected_points ?? 0;
-    const captainName = captainEl?.pick.webName ?? "Unknown";
+      const projMap = new Map(effectiveProjections.map((p) => [p.player_id, p]));
 
-    // Chip effects
-    const captainMultiplier = plannerChip === "3xc" ? 2 : 1; // TC = x3 total (base + 2x extra)
-    const benchBoostXPts = plannerChip === "bboost" ? benchXPts : 0;
-    const totalXPts = startingXPts + (captainXPts * captainMultiplier) + benchBoostXPts;
-    const netXPts = totalXPts - hitCost;
+      const starters = squad.filter((p) => p.position <= 11);
+      const bench = squad.filter((p) => p.position > 11);
 
-    // Generate ALWAYS-meaningful pros and cons
-    const pros: string[] = [];
-    const cons: string[] = [];
+      const starterProjs = starters
+        .map((pick) => ({ pick, proj: projMap.get(pick.element) }))
+        .filter((x) => x.proj);
+      const benchProjs = bench
+        .map((pick) => ({ pick, proj: projMap.get(pick.element) }))
+        .filter((x) => x.proj);
 
-    // --- Pros analysis ---
-    const highPerformers = starterProjs.filter((x) => (x.proj?.expected_points ?? 0) >= 5);
-    if (highPerformers.length >= 3) {
-      pros.push(`${highPerformers.length} players projected 5+ xPts — strong ceiling`);
-    } else if (highPerformers.length >= 1) {
-      pros.push(`${highPerformers.length} player(s) with 5+ xPts projection`);
-    }
+      const startingXPts = starterProjs.reduce((s, x) => s + (x.proj?.expected_points ?? 0), 0);
+      const benchXPts = benchProjs.reduce((s, x) => s + (x.proj?.expected_points ?? 0), 0);
 
-    if (captainXPts >= 6) {
-      pros.push(`Strong captain: ${captainName} at ${captainXPts.toFixed(1)} xPts (x2)`);
-    }
+      // Captain: use planner captain if set, else best xPts among starters
+      let captainEl: typeof starterProjs[0] | undefined;
+      if (plannerCaptainId) {
+        captainEl = starterProjs.find((x) => x.pick.element === plannerCaptainId);
+      }
+      if (!captainEl) {
+        captainEl = starterProjs.reduce(
+          (best, x) => ((x.proj?.expected_points ?? 0) > (best.proj?.expected_points ?? 0) ? x : best),
+          starterProjs[0]
+        );
+      }
+      const captainXPts = captainEl?.proj?.expected_points ?? 0;
+      const captainName = captainEl?.pick.webName ?? "Unknown";
 
-    const lowRisk = starterProjs.filter((x) => x.proj?.risk_rating === "low");
-    if (lowRisk.length >= 8) {
-      pros.push(`${lowRisk.length}/11 starters are nailed — reliable lineup`);
-    }
+      // Chip effects
+      const captainMultiplier = plannerChip === "3xc" ? 2 : 1;
+      const benchBoostXPts = plannerChip === "bboost" ? benchXPts : 0;
+      const totalXPts = startingXPts + (captainXPts * captainMultiplier) + benchBoostXPts;
+      const netXPts = totalXPts - hitCost;
 
-    const csPlayers = starterProjs.filter(
-      (x) => x.proj && x.proj.clean_sheet_probability >= 0.35 && (x.pick.elementType <= 2)
-    );
-    if (csPlayers.length >= 3) {
-      pros.push(`${csPlayers.length} DEF/GK with 35%+ clean sheet probability`);
-    }
+      // Helper: get EO for a player
+      const getEO = (elementId: number) => {
+        const el = plannerAllPlayers.find((e) => e.id === elementId);
+        return el ? parseFloat(el.selected_by_percent || "0") : 0;
+      };
 
-    if (benchXPts >= 10) {
-      pros.push(`Strong bench cover: ${benchXPts.toFixed(1)} xPts total`);
-    }
+      // Helper: get player status info
+      const getStatus = (elementId: number) => {
+        const el = plannerAllPlayers.find((e) => e.id === elementId);
+        return { status: el?.status ?? "a", chance: el?.chance_of_playing_next_round };
+      };
 
-    if (plannerTransfers.length > 0 && hitCost === 0) {
-      pros.push(`${plannerTransfers.length} free transfer(s) — no hit cost`);
-    }
+      const pros: string[] = [];
+      const cons: string[] = [];
 
-    // Chip-specific analysis
-    if (plannerChip === "3xc") {
-      pros.push(`Triple Captain on ${captainName}: ${(captainXPts * 3).toFixed(1)} projected pts`);
-      if (captainXPts < 5) cons.push(`TC on a sub-5 xPts captain is risky — consider saving`);
-    }
-    if (plannerChip === "bboost") {
-      pros.push(`Bench Boost adds ${benchXPts.toFixed(1)} extra xPts from bench`);
-      if (benchXPts < 8) cons.push(`Bench is weak for BB — only ${benchXPts.toFixed(1)} xPts`);
-    }
-    if (plannerChip === "freehit") {
-      pros.push("Free Hit active — unlimited transfers, no hits");
-    }
-    if (plannerChip === "wildcard") {
-      pros.push("Wildcard active — rebuild squad with no hit cost");
-    }
+      // ========== PROS ==========
+      const highPerformers = starterProjs.filter((x) => (x.proj?.expected_points ?? 0) >= 5);
+      if (highPerformers.length >= 3) {
+        pros.push(`${highPerformers.length} players projected 5+ xPts — strong ceiling`);
+      } else if (highPerformers.length >= 1) {
+        pros.push(`${highPerformers.length} player(s) with 5+ xPts projection`);
+      }
 
-    if (totalXPts >= 55) {
-      pros.push(`Projected ${totalXPts.toFixed(1)} xPts — green arrow territory`);
-    }
+      if (captainXPts >= 6) {
+        pros.push(`Strong captain: ${captainName} at ${captainXPts.toFixed(1)} xPts (x2)`);
+      }
 
-    // --- Cons analysis (ALWAYS generate at least 2) ---
-    const highRisk = starterProjs.filter((x) => x.proj?.risk_rating === "high");
-    if (highRisk.length > 0) {
-      const names = highRisk.map((x) => x.pick.webName).join(", ");
-      cons.push(`${highRisk.length} starter(s) rotation/injury risk: ${names}`);
-    }
+      const lowRisk = starterProjs.filter((x) => x.proj?.risk_rating === "low");
+      if (lowRisk.length >= 8) {
+        pros.push(`${lowRisk.length}/11 starters are nailed — reliable lineup`);
+      }
 
-    const mediumRisk = starterProjs.filter((x) => x.proj?.risk_rating === "medium");
-    if (mediumRisk.length >= 3) {
-      cons.push(`${mediumRisk.length} starters with moderate risk — lineups uncertain`);
-    }
+      const csPlayers = starterProjs.filter(
+        (x) => x.proj && x.proj.clean_sheet_probability >= 0.35 && (x.pick.elementType <= 2)
+      );
+      if (csPlayers.length >= 3) {
+        pros.push(`${csPlayers.length} DEF/GK with 35%+ clean sheet probability`);
+      }
 
-    if (captainXPts < 4.5) {
-      cons.push(`Weak captain options — best is ${captainName} at ${captainXPts.toFixed(1)} xPts`);
-    }
+      if (benchXPts >= 10) {
+        pros.push(`Strong bench cover: ${benchXPts.toFixed(1)} xPts total`);
+      }
 
-    const blanking = starterProjs.filter((x) => (x.proj?.expected_points ?? 0) === 0);
-    if (blanking.length > 0) {
-      const names = blanking.map((x) => x.pick.webName).join(", ");
-      cons.push(`${blanking.length} starter(s) blank this GW: ${names}`);
-    }
+      if (plannerTransfers.length > 0 && hitCost === 0) {
+        pros.push(`${plannerTransfers.length} free transfer(s) — no hit cost`);
+      }
 
-    if (benchXPts < 6) {
-      cons.push(`Weak bench at ${benchXPts.toFixed(1)} xPts — auto-sub insurance poor`);
-    }
+      if (plannerChip === "3xc") {
+        pros.push(`Triple Captain on ${captainName}: ${(captainXPts * 3).toFixed(1)} projected pts`);
+      }
+      if (plannerChip === "bboost") {
+        pros.push(`Bench Boost adds ${benchXPts.toFixed(1)} extra xPts from bench`);
+      }
+      if (plannerChip === "freehit") {
+        pros.push("Free Hit active — unlimited transfers, no hits");
+      }
+      if (plannerChip === "wildcard") {
+        pros.push("Wildcard active — rebuild squad with no hit cost");
+      }
 
-    if (hitCost > 0) {
-      cons.push(`Taking a ${hitCost}pt hit — net total drops to ${netXPts.toFixed(1)} xPts`);
-    }
+      if (totalXPts >= 55) {
+        pros.push(`Projected ${totalXPts.toFixed(1)} xPts — green arrow territory`);
+      }
 
-    // Low-xPts starters
-    const underperformers = starterProjs.filter((x) => (x.proj?.expected_points ?? 0) < 2.5 && (x.proj?.expected_points ?? 0) > 0);
-    if (underperformers.length >= 2) {
-      const names = underperformers.map((x) => `${x.pick.webName} (${(x.proj?.expected_points ?? 0).toFixed(1)})`).join(", ");
-      cons.push(`${underperformers.length} starters projected under 2.5 xPts: ${names}`);
-    }
+      // Ownership / differential
+      const highEO = starterProjs.filter((x) => getEO(x.pick.element) > 30);
+      if (highEO.length >= 6) {
+        pros.push(`${highEO.length} template picks — safe floor against average`);
+      }
 
-    // Fixture difficulty — players facing FDR 4-5
-    const toughFixtures = starterProjs.filter((x) => {
-      if (!x.proj) return false;
-      // High risk + low CS prob indicates tough fixture
-      return x.proj.goal_threat_score < 0.1 && x.proj.expected_points < 3 && x.pick.elementType >= 3;
-    });
-    if (toughFixtures.length >= 3) {
-      cons.push(`${toughFixtures.length} attacking players with low goal threat this GW`);
-    }
+      const diffPicks = starterProjs.filter((x) => getEO(x.pick.element) < 5 && (x.proj?.expected_points ?? 0) >= 4);
+      if (diffPicks.length >= 1) {
+        const names = diffPicks.map((x) => x.pick.webName).join(", ");
+        pros.push(`Differential edge: ${names} (<5% EO, 4+ xPts)`);
+      }
 
-    // Ownership concentration
-    const highEO = starterProjs.filter((x) => {
-      const el = plannerAllPlayers.find((e) => e.id === x.pick.element);
-      return el && parseFloat(el.selected_by_percent || "0") > 30;
-    });
-    if (highEO.length >= 6) {
-      pros.push(`${highEO.length} template picks — safe floor against average`);
-    }
+      // ========== CONS (deep critical analysis) ==========
 
-    const diffPicks = starterProjs.filter((x) => {
-      const el = plannerAllPlayers.find((e) => e.id === x.pick.element);
-      return el && parseFloat(el.selected_by_percent || "0") < 5 && (x.proj?.expected_points ?? 0) >= 4;
-    });
-    if (diffPicks.length >= 1) {
-      const names = diffPicks.map((x) => x.pick.webName).join(", ");
-      pros.push(`Differential edge: ${names} (<5% EO, 4+ xPts)`);
-    }
+      // 1. Individual low-xPts starters — flag EVERY player below 2.5 xPts by name
+      const deadWeight = starterProjs
+        .filter((x) => (x.proj?.expected_points ?? 0) < 2.5)
+        .sort((a, b) => (a.proj?.expected_points ?? 0) - (b.proj?.expected_points ?? 0));
+      if (deadWeight.length > 0) {
+        for (const dw of deadWeight) {
+          const xp = dw.proj?.expected_points ?? 0;
+          const eo = getEO(dw.pick.element);
+          if (xp < 1.0) {
+            cons.push(`${dw.pick.webName} at ${xp.toFixed(1)} xPts is a wasted slot — consider benching or transferring out`);
+          } else {
+            cons.push(`${dw.pick.webName} only ${xp.toFixed(1)} xPts${eo < 3 ? ` (${eo.toFixed(1)}% EO — nobody owns him)` : ""} — low return expected`);
+          }
+        }
+      }
 
-    // Ensure at least 1 pro and 2 cons always
-    if (pros.length === 0) {
-      const avgXPts = startingXPts / Math.max(starterProjs.length, 1);
-      pros.push(`Average starter xPts: ${avgXPts.toFixed(1)} — ${avgXPts >= 3.5 ? "decent" : "needs improvement"}`);
-    }
-    if (cons.length < 2) {
-      if (totalXPts < 50) cons.push(`Total xPts (${totalXPts.toFixed(1)}) below 50 — red arrow risk`);
-      if (cons.length < 2) cons.push(`Limited differential upside — similar to template managers`);
-    }
+      // 2. Injury / doubtful / unavailable starters
+      const injuredStarters = starterProjs.filter((x) => {
+        const s = getStatus(x.pick.element);
+        return s.status === "i" || s.status === "s" || s.status === "n";
+      });
+      if (injuredStarters.length > 0) {
+        const names = injuredStarters.map((x) => x.pick.webName).join(", ");
+        cons.push(`${injuredStarters.length} starter(s) injured/suspended: ${names} — will NOT play, points likely 0`);
+      }
 
-    setSimulationResult({
-      totalXPts: Math.round(totalXPts * 10) / 10,
-      startingXPts: Math.round(startingXPts * 10) / 10,
-      captainName,
-      captainXPts: Math.round(captainXPts * 10) / 10,
-      pros,
-      cons,
-      benchXPts: Math.round(benchXPts * 10) / 10,
-      hitCost,
-      netXPts: Math.round(netXPts * 10) / 10,
-    });
-    setSimulating(false);
+      const doubtfulStarters = starterProjs.filter((x) => {
+        const s = getStatus(x.pick.element);
+        return s.status === "d" || (s.chance !== null && s.chance !== undefined && s.chance <= 50);
+      });
+      if (doubtfulStarters.length > 0) {
+        const names = doubtfulStarters.map((x) => {
+          const s = getStatus(x.pick.element);
+          return `${x.pick.webName}${s.chance !== null && s.chance !== undefined ? ` (${s.chance}% chance)` : ""}`;
+        }).join(", ");
+        cons.push(`${doubtfulStarters.length} doubtful: ${names} — high risk of 0 minutes`);
+      }
+
+      // 3. Rotation / high-risk starters
+      const highRisk = starterProjs.filter((x) => x.proj?.risk_rating === "high");
+      if (highRisk.length > 0) {
+        const names = highRisk.map((x) => x.pick.webName).join(", ");
+        cons.push(`${highRisk.length} starter(s) rotation risk: ${names} — could be benched`);
+      }
+
+      const mediumRisk = starterProjs.filter((x) => x.proj?.risk_rating === "medium");
+      if (mediumRisk.length >= 3) {
+        cons.push(`${mediumRisk.length} starters with moderate risk — lineups uncertain`);
+      }
+
+      // 4. Captain weakness
+      if (captainXPts < 4.5) {
+        cons.push(`Weak captain — ${captainName} at ${captainXPts.toFixed(1)} xPts is below the threshold for a reliable captain pick`);
+      } else if (captainXPts < 5.5) {
+        cons.push(`Captain ${captainName} at ${captainXPts.toFixed(1)} xPts — decent but not explosive, consider a differential`);
+      }
+
+      // 5. Chip-specific warnings
+      if (plannerChip === "3xc" && captainXPts < 5) {
+        cons.push(`Triple Captain on a sub-5 xPts player (${captainName}) — chip likely wasted, save for a DGW`);
+      }
+      if (plannerChip === "bboost" && benchXPts < 8) {
+        cons.push(`Bench Boost with only ${benchXPts.toFixed(1)} bench xPts — poor value, save for a stronger bench week`);
+      }
+
+      // 6. Blanking starters (0 xPts)
+      const blanking = starterProjs.filter((x) => (x.proj?.expected_points ?? 0) === 0);
+      if (blanking.length > 0) {
+        const names = blanking.map((x) => x.pick.webName).join(", ");
+        cons.push(`${blanking.length} starter(s) projected 0 xPts: ${names} — guaranteed dead weight`);
+      }
+
+      // 7. Weak bench
+      if (benchXPts < 6) {
+        cons.push(`Weak bench at ${benchXPts.toFixed(1)} xPts — if a starter doesn't play, auto-sub cover is poor`);
+      }
+
+      // 8. Hit cost impact
+      if (hitCost > 0) {
+        cons.push(`Taking a ${hitCost}pt hit — net total drops to ${netXPts.toFixed(1)} xPts (need ${hitCost}+ pts from transfers just to break even)`);
+      }
+
+      // 9. Low goal threat for attackers
+      const lowThreatAttackers = starterProjs.filter((x) => {
+        if (!x.proj || x.pick.elementType < 3) return false;
+        return x.proj.goal_threat_score < 0.1 && x.proj.expected_points < 3;
+      });
+      if (lowThreatAttackers.length >= 2) {
+        const names = lowThreatAttackers.map((x) => `${x.pick.webName} (${(x.proj?.expected_points ?? 0).toFixed(1)})`).join(", ");
+        cons.push(`${lowThreatAttackers.length} attackers/mids with low goal threat: ${names}`);
+      }
+
+      // 10. Team concentration risk
+      const teamCounts: Record<number, string[]> = {};
+      for (const sp of starterProjs) {
+        const tid = sp.pick.teamId;
+        if (!teamCounts[tid]) teamCounts[tid] = [];
+        teamCounts[tid].push(sp.pick.webName);
+      }
+      for (const [, names] of Object.entries(teamCounts)) {
+        if (names.length >= 3) {
+          cons.push(`${names.length} starters from same team (${names.join(", ")}) — one bad result tanks your GW`);
+        }
+      }
+
+      // 11. No clean sheet coverage
+      const csDefGK = starterProjs.filter((x) => x.proj && x.proj.clean_sheet_probability >= 0.25 && x.pick.elementType <= 2);
+      if (csDefGK.length === 0) {
+        cons.push("No DEF/GK with 25%+ CS probability — limited defensive upside");
+      }
+
+      // 12. Red arrow risk
+      if (totalXPts < 45) {
+        cons.push(`Total xPts (${totalXPts.toFixed(1)}) well below average — high red arrow risk`);
+      } else if (totalXPts < 50) {
+        cons.push(`Total xPts (${totalXPts.toFixed(1)}) below 50 — red arrow risk`);
+      }
+
+      // 13. Low EO differentials with low xPts — wasting a slot
+      const lowEOlowXP = starterProjs.filter((x) => getEO(x.pick.element) < 3 && (x.proj?.expected_points ?? 0) < 3);
+      if (lowEOlowXP.length > 0) {
+        const names = lowEOlowXP.map((x) => x.pick.webName).join(", ");
+        cons.push(`${names} — low EO AND low xPts, differential only works if they haul`);
+      }
+
+      // Ensure at least 1 pro and 2 cons always
+      if (pros.length === 0) {
+        const avgXPts = startingXPts / Math.max(starterProjs.length, 1);
+        pros.push(`Average starter xPts: ${avgXPts.toFixed(1)} — ${avgXPts >= 3.5 ? "decent" : "needs improvement"}`);
+      }
+      if (cons.length < 2) {
+        cons.push("Limited differential upside — similar to template managers");
+      }
+      if (cons.length < 2) {
+        cons.push("No major edge over the average manager this GW");
+      }
+
+      setSimulationResult({
+        totalXPts: Math.round(totalXPts * 10) / 10,
+        startingXPts: Math.round(startingXPts * 10) / 10,
+        captainName,
+        captainXPts: Math.round(captainXPts * 10) / 10,
+        pros,
+        cons,
+        benchXPts: Math.round(benchXPts * 10) / 10,
+        hitCost,
+        netXPts: Math.round(netXPts * 10) / 10,
+      });
+      setSimulating(false);
+
+      // Scroll to results after a tick to let the DOM render
+      requestAnimationFrame(() => {
+        simulationResultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }, 1500); // 1.5s delay for AI animation
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -1237,9 +1331,18 @@ function DashboardInner() {
               <button
                 onClick={runSimulation}
                 disabled={simulating || plannerProjections.length === 0}
-                className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white font-semibold text-sm hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-purple-900/30"
+                className={`px-5 py-2.5 rounded-lg text-white font-semibold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-purple-900/30 ${
+                  simulating
+                    ? "bg-gradient-to-r from-purple-700 to-indigo-600 animate-pulse"
+                    : "bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400"
+                }`}
               >
-                {simulating ? "Simulating..." : "Simulate Scenario"}
+                {simulating ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    AI Analyzing...
+                  </span>
+                ) : "Simulate Scenario"}
               </button>
             </div>
           </div>
@@ -1545,9 +1648,27 @@ function DashboardInner() {
           </div>
         )}
 
+        {/* AI Analyzing Animation */}
+        {simulating && (
+          <div className="mx-6 mb-6 p-8 rounded-xl bg-gradient-to-br from-purple-950/40 to-indigo-950/30 border border-purple-700/40">
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative">
+                <div className="w-12 h-12 rounded-full border-2 border-purple-500/30 border-t-purple-400 animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" /></svg>
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-purple-300 font-semibold text-sm">AI Analyzing Your Squad</div>
+                <div className="text-slate-500 text-xs mt-1 animate-pulse">Evaluating xPts, fixtures, ownership, risk factors...</div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Simulation Results */}
         {simulationResult && (
-          <div className="mx-6 mb-6 space-y-4">
+          <div ref={simulationResultRef} className="mx-6 mb-6 space-y-4">
             {/* Summary stats */}
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
