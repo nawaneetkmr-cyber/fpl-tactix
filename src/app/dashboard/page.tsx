@@ -1348,26 +1348,45 @@ function DashboardInner() {
           </div>
 
           {/* Transfer info bar */}
-          <div className="flex flex-wrap items-center gap-2 mt-3 text-sm">
-            <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
-              Bank: <span className="font-semibold text-emerald-400">£{getPlannerBank().toFixed(1)}m</span>
-            </span>
-            <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
-              FT: <span className="font-semibold text-slate-50">{data.freeTransfers ?? 1}</span>
-            </span>
-            <span className={`px-2.5 py-1 rounded border ${
-              getPlannerHitCost() > 0
-                ? "bg-red-900/30 border-red-700/40 text-red-400"
-                : "bg-slate-800 border-slate-700 text-slate-400"
-            }`}>
-              Hit: <span className="font-semibold">{getPlannerHitCost() > 0 ? `-${getPlannerHitCost()}pts` : "0"}</span>
-            </span>
-            {plannerTransfers.length > 0 && (
-              <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
-                Transfers: <span className="font-semibold text-purple-400">{plannerTransfers.length}</span>
-              </span>
-            )}
-          </div>
+          {(() => {
+            const plannerBank = getPlannerBank();
+            const isNegativeBank = plannerBank < 0;
+            return (
+              <>
+                <div className="flex flex-wrap items-center gap-2 mt-3 text-sm">
+                  <span className={`px-2.5 py-1 rounded border ${
+                    isNegativeBank
+                      ? "bg-red-900/30 border-red-700/40 text-red-300"
+                      : "bg-slate-800 border-slate-700 text-slate-300"
+                  }`}>
+                    Bank: <span className={`font-semibold ${isNegativeBank ? "text-red-400" : "text-emerald-400"}`}>
+                      £{plannerBank.toFixed(1)}m
+                    </span>
+                  </span>
+                  <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
+                    FT: <span className="font-semibold text-slate-50">{data.freeTransfers ?? 1}</span>
+                  </span>
+                  <span className={`px-2.5 py-1 rounded border ${
+                    getPlannerHitCost() > 0
+                      ? "bg-red-900/30 border-red-700/40 text-red-400"
+                      : "bg-slate-800 border-slate-700 text-slate-400"
+                  }`}>
+                    Hit: <span className="font-semibold">{getPlannerHitCost() > 0 ? `-${getPlannerHitCost()}pts` : "0"}</span>
+                  </span>
+                  {plannerTransfers.length > 0 && (
+                    <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
+                      Transfers: <span className="font-semibold text-purple-400">{plannerTransfers.length}</span>
+                    </span>
+                  )}
+                </div>
+                {isNegativeBank && (
+                  <div className="mt-2 px-3 py-2 rounded-lg bg-amber-900/20 border border-amber-700/30 text-xs text-amber-300/80">
+                    Effective budget depends on selling price (which may differ from current value), purchase price, and price changes since you bought the player. FPL only updates your actual bank after the current GW ends.
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* Chip toggle buttons */}
           {getRemainingChips().length > 0 && (
@@ -1445,6 +1464,9 @@ function DashboardInner() {
                 onCaptainClick={(elementId) => {
                   setPlannerCaptainId(elementId);
                 }}
+                onTransferOut={() => setPlannerSwapMode("transfer")}
+                onBenchSwap={() => setPlannerSwapMode("benchswap")}
+                onCancel={() => { setPlannerSelectedSlot(null); setPlannerSwapMode(null); }}
                 plannerFixtures={plannerFixtures}
                 plannerTeams={plannerTeams}
                 plannerNextGW={plannerNextGW}
@@ -1518,12 +1540,11 @@ function DashboardInner() {
                 {/* Player list */}
                 <div className="flex-1 overflow-y-auto">
                   {candidates.map((c) => {
-                    const affordable = c.cost <= (bankAvailable + outCost);
+                    const overBudget = c.cost > (bankAvailable + outCost);
                     const cTeam = bootstrapTeams.find((t) => t.short_name === c.team);
                     return (
                       <button
                         key={c.id}
-                        disabled={!affordable}
                         onClick={() => {
                           const origOut = plannerTransfers.find((t) => t.inId === plannerSelectedSlot);
                           const realOutId = origOut ? origOut.outId : plannerSelectedSlot;
@@ -1534,11 +1555,7 @@ function DashboardInner() {
                           setSimulationResult(null);
                           setSidebarSearch("");
                         }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 border-b border-slate-700/50 transition-colors ${
-                          affordable
-                            ? "hover:bg-slate-700/50 text-slate-200"
-                            : "opacity-40 cursor-not-allowed text-slate-500"
-                        }`}
+                        className={`w-full flex items-center gap-3 px-4 py-3 border-b border-slate-700/50 transition-colors hover:bg-slate-700/50 text-slate-200`}
                       >
                         {cTeam && (
                           /* eslint-disable-next-line @next/next/no-img-element */
@@ -1557,7 +1574,9 @@ function DashboardInner() {
                         </div>
                         <div className="text-right">
                           <div className="text-sm font-bold text-emerald-400">{c.xPts}</div>
-                          <div className={`text-xs ${affordable ? "text-slate-400" : "text-red-400"}`}>£{c.cost.toFixed(1)}m</div>
+                          <div className={`text-xs ${overBudget ? "text-red-400" : "text-slate-400"}`}>
+                            £{c.cost.toFixed(1)}m{overBudget && " *"}
+                          </div>
                         </div>
                       </button>
                     );
@@ -1570,40 +1589,6 @@ function DashboardInner() {
             );
           })()}
         </div>
-
-        {/* Action buttons when player is selected but no mode chosen yet */}
-        {plannerSelectedSlot && !plannerSwapMode && plannerProjections.length > 0 && (
-          <div className="mx-6 mb-4 p-4 rounded-lg bg-slate-800 border border-purple-700/40">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-300">
-                Selected: <span className="font-semibold text-slate-50">{getPlannerSquad().find((p) => p.element === plannerSelectedSlot)?.webName}</span>
-              </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPlannerSwapMode("transfer")}
-                  className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-500 transition-colors"
-                >
-                  Transfer Out
-                </button>
-                <button
-                  onClick={() => setPlannerSwapMode("benchswap")}
-                  className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-500 transition-colors"
-                >
-                  Swap with Bench/Starter
-                </button>
-                <button
-                  onClick={() => { setPlannerSelectedSlot(null); setPlannerSwapMode(null); }}
-                  className="px-3 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm hover:bg-slate-600 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-            {plannerSwapMode === "benchswap" && (
-              <p className="text-xs text-amber-400/70 mt-2">Now tap the player you want to swap with</p>
-            )}
-          </div>
-        )}
 
         {/* Bench swap mode indicator */}
         {plannerSwapMode === "benchswap" && plannerSelectedSlot && (
@@ -1740,6 +1725,9 @@ function PlannerPitch({
   selectedSlot,
   onPlayerClick,
   onCaptainClick,
+  onTransferOut,
+  onBenchSwap,
+  onCancel,
   plannerFixtures,
   plannerTeams,
   plannerNextGW,
@@ -1755,6 +1743,9 @@ function PlannerPitch({
   selectedSlot: number | null;
   onPlayerClick: (elementId: number) => void;
   onCaptainClick: (elementId: number) => void;
+  onTransferOut: () => void;
+  onBenchSwap: () => void;
+  onCancel: () => void;
   plannerFixtures: FixtureDetail[];
   plannerTeams: TeamStrength[];
   plannerNextGW: number | null;
@@ -1829,15 +1820,48 @@ function PlannerPitch({
 
     const xPtsColor = xPts >= 5 ? "text-emerald-400" : xPts >= 3 ? "text-yellow-300" : xPts > 0 ? "text-orange-400" : "text-red-400";
 
+    const showPopover = isSelected && !swapMode;
+    // Forwards are at the top of the pitch — show popover below them to avoid clipping
+    const popoverBelow = pick.elementType === 4;
+
     return (
       <div
         key={pick.element}
-        className={`flex flex-col items-center cursor-pointer transition-all ${
+        className={`relative flex flex-col items-center cursor-pointer transition-all ${
           isBench ? "opacity-60 hover:opacity-90" : ""
-        } ${isSelected ? "scale-110" : "hover:scale-105"}`}
+        } ${isSelected ? "scale-110 z-30" : "hover:scale-105"}`}
         style={{ width: 82 }}
         onClick={() => onPlayerClick(pick.element)}
       >
+        {/* Popover — Transfer Out / Swap / Cancel (ABOVE for most, BELOW for forwards) */}
+        {showPopover && !popoverBelow && (
+          <div
+            className="absolute -top-[72px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 rounded-xl bg-slate-900/95 backdrop-blur border border-purple-500/50 shadow-xl shadow-purple-900/30"
+            onClick={(e) => e.stopPropagation()}
+            style={{ minWidth: 200 }}
+          >
+            <button
+              onClick={onTransferOut}
+              className="flex-1 px-2.5 py-2 rounded-lg bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-500 transition-colors whitespace-nowrap"
+            >
+              Transfer Out
+            </button>
+            <button
+              onClick={onBenchSwap}
+              className="flex-1 px-2.5 py-2 rounded-lg bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-500 transition-colors whitespace-nowrap"
+            >
+              Swap
+            </button>
+            <button
+              onClick={onCancel}
+              className="px-2 py-2 rounded-lg bg-slate-700 text-slate-300 text-[11px] hover:bg-slate-600 transition-colors"
+            >
+              &times;
+            </button>
+            {/* Arrow pointing down */}
+            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-slate-900/95 border-b border-r border-purple-500/50" />
+          </div>
+        )}
         {/* xPts card */}
         <div className={`relative rounded-lg px-2 py-1.5 border transition-all ${
           isSelected
@@ -1884,6 +1908,35 @@ function PlannerPitch({
           >
             {isCaptainPick ? "CAPT" : "set C"}
           </button>
+        )}
+        {/* Popover BELOW card — for forwards (top row) to avoid clipping */}
+        {showPopover && popoverBelow && (
+          <div
+            className="absolute -bottom-[52px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 rounded-xl bg-slate-900/95 backdrop-blur border border-purple-500/50 shadow-xl shadow-purple-900/30"
+            onClick={(e) => e.stopPropagation()}
+            style={{ minWidth: 200 }}
+          >
+            {/* Arrow pointing up */}
+            <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-slate-900/95 border-t border-l border-purple-500/50" />
+            <button
+              onClick={onTransferOut}
+              className="flex-1 px-2.5 py-2 rounded-lg bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-500 transition-colors whitespace-nowrap"
+            >
+              Transfer Out
+            </button>
+            <button
+              onClick={onBenchSwap}
+              className="flex-1 px-2.5 py-2 rounded-lg bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-500 transition-colors whitespace-nowrap"
+            >
+              Swap
+            </button>
+            <button
+              onClick={onCancel}
+              className="px-2 py-2 rounded-lg bg-slate-700 text-slate-300 text-[11px] hover:bg-slate-600 transition-colors"
+            >
+              &times;
+            </button>
+          </div>
         )}
       </div>
     );
