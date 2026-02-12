@@ -268,6 +268,29 @@ export async function GET(req: Request) {
     const isGwFinished = gwEventFinal?.finished ?? false;
     const isGwCurrent = gwEventFinal?.is_current ?? false;
 
+    // Active chip for this GW (from picks endpoint)
+    const activeChip: string | null = picksData.active_chip ?? null;
+
+    // Extract bank & free transfers for planner
+    const bankValue = (picksData.entry_history?.bank ?? 0) / 10;
+    let freeTransfersValue = 1;
+    if (latestHistory && latestHistory.length >= 2) {
+      const sortedH = [...latestHistory].sort(
+        (a: { event: number }, b: { event: number }) => b.event - a.event
+      );
+      const prevGwH = sortedH.find(
+        (h: { event: number }) => h.event === gw - 1
+      );
+      if (prevGwH && prevGwH.event_transfers === 0) {
+        freeTransfersValue = 2;
+      }
+    }
+
+    // Chips used
+    const chipsUsed: string[] = (latestHistory || [])
+      .filter((h: { active_chip: string | null }) => h.active_chip)
+      .map((h: { active_chip: string }) => h.active_chip);
+
     return Response.json({
       teamName: entry.name,
       playerName: `${entry.player_first_name} ${entry.player_last_name}`,
@@ -275,7 +298,6 @@ export async function GET(req: Request) {
       isGwFinished,
       isGwCurrent,
       targetGw: (() => {
-        // Tell the UI which GW the solver projected for
         const gwEv = bootstrap.events?.find((e: { id: number }) => e.id === gw);
         const nxtEv = bootstrap.events?.find((e: { is_next: boolean }) => e.is_next);
         return gwEv && !gwEv.finished ? gw : (nxtEv?.id ?? gw + 1);
@@ -295,6 +317,10 @@ export async function GET(req: Request) {
       liveElements,
       elements,
       teams,
+      bank: bankValue,
+      freeTransfers: freeTransfersValue,
+      chipsUsed,
+      activeChip,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
