@@ -1821,6 +1821,8 @@ function PlannerPitch({
     const xPtsColor = xPts >= 5 ? "text-emerald-400" : xPts >= 3 ? "text-yellow-300" : xPts > 0 ? "text-orange-400" : "text-red-400";
 
     const showPopover = isSelected && !swapMode;
+    // Forwards are at the top of the pitch — show popover below them to avoid clipping
+    const popoverBelow = pick.elementType === 4;
 
     return (
       <div
@@ -1831,8 +1833,8 @@ function PlannerPitch({
         style={{ width: 82 }}
         onClick={() => onPlayerClick(pick.element)}
       >
-        {/* Popover — Transfer Out / Swap / Cancel */}
-        {showPopover && (
+        {/* Popover — Transfer Out / Swap / Cancel (ABOVE for most, BELOW for forwards) */}
+        {showPopover && !popoverBelow && (
           <div
             className="absolute -top-[72px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 rounded-xl bg-slate-900/95 backdrop-blur border border-purple-500/50 shadow-xl shadow-purple-900/30"
             onClick={(e) => e.stopPropagation()}
@@ -1906,6 +1908,35 @@ function PlannerPitch({
           >
             {isCaptainPick ? "CAPT" : "set C"}
           </button>
+        )}
+        {/* Popover BELOW card — for forwards (top row) to avoid clipping */}
+        {showPopover && popoverBelow && (
+          <div
+            className="absolute -bottom-[52px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 rounded-xl bg-slate-900/95 backdrop-blur border border-purple-500/50 shadow-xl shadow-purple-900/30"
+            onClick={(e) => e.stopPropagation()}
+            style={{ minWidth: 200 }}
+          >
+            {/* Arrow pointing up */}
+            <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-slate-900/95 border-t border-l border-purple-500/50" />
+            <button
+              onClick={onTransferOut}
+              className="flex-1 px-2.5 py-2 rounded-lg bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-500 transition-colors whitespace-nowrap"
+            >
+              Transfer Out
+            </button>
+            <button
+              onClick={onBenchSwap}
+              className="flex-1 px-2.5 py-2 rounded-lg bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-500 transition-colors whitespace-nowrap"
+            >
+              Swap
+            </button>
+            <button
+              onClick={onCancel}
+              className="px-2 py-2 rounded-lg bg-slate-700 text-slate-300 text-[11px] hover:bg-slate-600 transition-colors"
+            >
+              &times;
+            </button>
+          </div>
         )}
       </div>
     );
