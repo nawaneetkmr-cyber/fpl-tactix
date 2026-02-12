@@ -131,17 +131,19 @@ export async function GET(req: Request) {
 
     let milpOptimization = null;
     try {
-      // Determine target GW for projections
-      // If the current GW is still in progress (not finished), project for it
-      // so the "Optimized XI Captain" reflects the active GW (important for DGWs).
-      // Only project for next GW if the current one is fully finished.
-      const gwEvent = bootstrap.events?.find(
-        (e: { id: number }) => e.id === gw
-      );
+      // Determine the NEXT unstarted GW for transfer recommendations.
+      // Transfers can only be made BEFORE a GW starts, so the solver must
+      // always target the upcoming GW — never the current live one.
       const nextEvent = bootstrap.events?.find(
         (e: { is_next: boolean }) => e.is_next
       );
-      const targetGw = gwEvent && !gwEvent.finished ? gw : (nextEvent?.id ?? gw + 1);
+      const gwEvent = bootstrap.events?.find(
+        (e: { id: number }) => e.id === gw
+      );
+      // If current GW is live (not finished), transfers are for the next GW.
+      // If current GW is finished, next event is the target.
+      // Fallback to gw + 1 if no next event found.
+      const transferTargetGw = nextEvent?.id ?? gw + 1;
 
       // Build team short_name lookup
       const teamShortNames: Record<number, string> = {};
@@ -149,16 +151,47 @@ export async function GET(req: Request) {
         teamShortNames[t.id] = t.short_name;
       }
 
-      // Calculate xP projections for ALL players for the target GW
-      const projections = calculatePlayerProjections(
+      const validFixtures = fixtures.filter(
+        (f: { event: number | null }) => f.event != null && f.event > 0
+      ) as FixtureDetail[];
+
+      // ── Multi-GW Weighted Projections ──
+      // Instead of only looking at the next GW's xPts (which inflates
+      // DGW players you'd need to sell the week after), blend the next
+      // 3 GWs so consistently good players rank higher than one-week punts.
+      const GW_WEIGHTS = [0.60, 0.25, 0.15]; // next GW, GW+1, GW+2
+      const gwTargets = [transferTargetGw, transferTargetGw + 1, transferTargetGw + 2];
+
+      // Calculate projections for each of the next 3 GWs
+      const multiGwProjs: Map<number, number>[] = gwTargets.map((targetGw) => {
+        const projs = calculatePlayerProjections(
+          elements as FullElement[],
+          (bootstrap.teams || []) as TeamStrength[],
+          validFixtures,
+          targetGw
+        );
+        return new Map(projs.map((p) => [p.player_id, p.expected_points]));
+      });
+
+      // Also get the primary GW projections for display/captain pick
+      const primaryProjections = calculatePlayerProjections(
         elements as FullElement[],
         (bootstrap.teams || []) as TeamStrength[],
-        fixtures.filter(
-          (f: { event: number | null }) => f.event != null && f.event > 0
-        ) as FixtureDetail[],
-        targetGw
+        validFixtures,
+        transferTargetGw
       );
-      const projMap = new Map(projections.map((p) => [p.player_id, p]));
+      const primaryProjMap = new Map(primaryProjections.map((p) => [p.player_id, p]));
+
+      // Compute blended multi-GW xP for each player
+      const blendedXP = new Map<number, number>();
+      for (const el of elements as FullElement[]) {
+        let weightedXP = 0;
+        for (let i = 0; i < gwTargets.length; i++) {
+          const gwXP = multiGwProjs[i].get(el.id) ?? 0;
+          weightedXP += gwXP * GW_WEIGHTS[i];
+        }
+        blendedXP.set(el.id, Math.round(weightedXP * 10) / 10);
+      }
 
       // Current squad element IDs
       const squadIds = new Set(picks.map((p: { element: number }) => p.element));
@@ -180,13 +213,12 @@ export async function GET(req: Request) {
         }
       }
 
-      // Build player pool for the solver
+      // Build player pool for the solver using BLENDED multi-GW xP
       const playerPool: SolverPlayer[] = [];
 
       // Add current squad (15 players)
       for (const el of elements as FullElement[]) {
         if (!squadIds.has(el.id)) continue;
-        const proj = projMap.get(el.id);
         const pick = picks.find(
           (p: { element: number }) => p.element === el.id
         );
@@ -199,24 +231,24 @@ export async function GET(req: Request) {
           position: pos,
           now_cost: el.now_cost / 10,
           selling_price: el.now_cost / 10,
-          xP: proj?.expected_points ?? 0,
+          xP: blendedXP.get(el.id) ?? 0,
           ownership_percent: parseFloat(el.selected_by_percent || "0"),
           in_current_squad: true,
           is_current_starter: pick ? pick.position <= 11 : false,
         });
       }
 
-      // Add top non-squad targets by xP (top 10 per position, ~40 players)
-      const nonSquadProjections = projections
-        .filter((p) => !squadIds.has(p.player_id) && p.expected_points > 1.0)
-        .sort((a, b) => b.expected_points - a.expected_points);
+      // Add top non-squad targets by blended xP (top 10 per position, ~40 players)
+      const nonSquadPlayers = (elements as FullElement[])
+        .filter((el) => !squadIds.has(el.id))
+        .map((el) => ({ el, xP: blendedXP.get(el.id) ?? 0 }))
+        .filter((x) => x.xP > 1.0)
+        .sort((a, b) => b.xP - a.xP);
 
       const targetCounts: Record<string, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
       const MAX_TARGETS_PER_POS = 10;
 
-      for (const proj of nonSquadProjections) {
-        const el = (elements as FullElement[]).find((e) => e.id === proj.player_id);
-        if (!el) continue;
+      for (const { el, xP } of nonSquadPlayers) {
         const pos = ELEMENT_TYPE_TO_POS[el.element_type] ?? "MID";
         if ((targetCounts[pos] ?? 0) >= MAX_TARGETS_PER_POS) continue;
         targetCounts[pos] = (targetCounts[pos] ?? 0) + 1;
@@ -228,7 +260,7 @@ export async function GET(req: Request) {
           position: pos,
           now_cost: el.now_cost / 10,
           selling_price: el.now_cost / 10,
-          xP: proj.expected_points,
+          xP,
           ownership_percent: parseFloat(el.selected_by_percent || "0"),
           in_current_squad: false,
           is_current_starter: false,
@@ -298,9 +330,9 @@ export async function GET(req: Request) {
       isGwFinished,
       isGwCurrent,
       targetGw: (() => {
-        const gwEv = bootstrap.events?.find((e: { id: number }) => e.id === gw);
+        // Transfer Brain always targets the next unstarted GW
         const nxtEv = bootstrap.events?.find((e: { is_next: boolean }) => e.is_next);
-        return gwEv && !gwEv.finished ? gw : (nxtEv?.id ?? gw + 1);
+        return nxtEv?.id ?? gw + 1;
       })(),
       livePoints,
       benchPoints,
