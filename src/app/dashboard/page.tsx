@@ -90,6 +90,7 @@ interface DashboardData {
   bank?: number;
   freeTransfers?: number;
   chipsUsed?: string[];
+  activeChip?: string | null;
   error?: string;
 }
 
@@ -166,9 +167,14 @@ function DashboardInner() {
 
   // Planner transfer simulation state
   interface PlannerTransfer { outId: number; inId: number; }
+  interface BenchSwap { starterId: number; benchId: number; }
   const [plannerTransfers, setPlannerTransfers] = useState<PlannerTransfer[]>([]);
-  const [plannerSelectedSlot, setPlannerSelectedSlot] = useState<number | null>(null); // element id of player being swapped
+  const [plannerBenchSwaps, setPlannerBenchSwaps] = useState<BenchSwap[]>([]);
+  const [plannerSelectedSlot, setPlannerSelectedSlot] = useState<number | null>(null);
+  const [plannerSwapMode, setPlannerSwapMode] = useState<"transfer" | "benchswap" | null>(null);
   const [plannerCaptainId, setPlannerCaptainId] = useState<number | null>(null);
+  const [plannerChip, setPlannerChip] = useState<string | null>(null);
+  const [sidebarSearch, setSidebarSearch] = useState("");
   const [simulationResult, setSimulationResult] = useState<{
     totalXPts: number;
     startingXPts: number;
@@ -378,10 +384,11 @@ function DashboardInner() {
     };
   }, [data]);
 
-  // Build the "effective squad" after planner transfers are applied
+  // Build the "effective squad" after planner transfers + bench swaps applied
   function getPlannerSquad(): EnrichedPick[] {
     if (!data) return [];
     let squad = [...data.picks];
+    // Apply transfers
     for (const t of plannerTransfers) {
       const outIdx = squad.findIndex((p) => p.element === t.outId);
       if (outIdx === -1) continue;
@@ -394,6 +401,15 @@ function DashboardInner() {
         teamId: inEl.team,
         elementType: inEl.element_type,
       };
+    }
+    // Apply bench swaps (swap positions)
+    for (const bs of plannerBenchSwaps) {
+      const sIdx = squad.findIndex((p) => p.element === bs.starterId);
+      const bIdx = squad.findIndex((p) => p.element === bs.benchId);
+      if (sIdx === -1 || bIdx === -1) continue;
+      const sPos = squad[sIdx].position;
+      squad[sIdx] = { ...squad[sIdx], position: squad[bIdx].position };
+      squad[bIdx] = { ...squad[bIdx], position: sPos };
     }
     return squad;
   }
@@ -412,8 +428,9 @@ function DashboardInner() {
     return Math.round(bank * 10) / 10;
   }
 
-  // Compute hits
+  // Compute hits (wildcard/freehit = no hits)
   function getPlannerHitCost(): number {
+    if (plannerChip === "wildcard" || plannerChip === "freehit") return 0;
     const ft = data?.freeTransfers ?? 1;
     const extraTransfers = Math.max(0, plannerTransfers.length - ft);
     return extraTransfers * 4;
@@ -503,7 +520,10 @@ function DashboardInner() {
     const captainXPts = captainEl?.proj?.expected_points ?? 0;
     const captainName = captainEl?.pick.webName ?? "Unknown";
 
-    const totalXPts = startingXPts + captainXPts;
+    // Chip effects
+    const captainMultiplier = plannerChip === "3xc" ? 2 : 1; // TC = x3 total (base + 2x extra)
+    const benchBoostXPts = plannerChip === "bboost" ? benchXPts : 0;
+    const totalXPts = startingXPts + (captainXPts * captainMultiplier) + benchBoostXPts;
     const netXPts = totalXPts - hitCost;
 
     // Generate ALWAYS-meaningful pros and cons
@@ -540,6 +560,22 @@ function DashboardInner() {
 
     if (plannerTransfers.length > 0 && hitCost === 0) {
       pros.push(`${plannerTransfers.length} free transfer(s) — no hit cost`);
+    }
+
+    // Chip-specific analysis
+    if (plannerChip === "3xc") {
+      pros.push(`Triple Captain on ${captainName}: ${(captainXPts * 3).toFixed(1)} projected pts`);
+      if (captainXPts < 5) cons.push(`TC on a sub-5 xPts captain is risky — consider saving`);
+    }
+    if (plannerChip === "bboost") {
+      pros.push(`Bench Boost adds ${benchXPts.toFixed(1)} extra xPts from bench`);
+      if (benchXPts < 8) cons.push(`Bench is weak for BB — only ${benchXPts.toFixed(1)} xPts`);
+    }
+    if (plannerChip === "freehit") {
+      pros.push("Free Hit active — unlimited transfers, no hits");
+    }
+    if (plannerChip === "wildcard") {
+      pros.push("Wildcard active — rebuild squad with no hit cost");
     }
 
     if (totalXPts >= 55) {
@@ -790,6 +826,7 @@ function DashboardInner() {
             short_name: t.short_name,
             code: t.code,
           }))}
+          activeChip={data.activeChip}
         />
       </section>
 
@@ -1139,7 +1176,7 @@ function DashboardInner() {
       </section>
 
       {/* ===== SECTION 6: GW PLANNER — PITCH VIEW WITH TRANSFER SIMULATION ===== */}
-      <section className="bg-slate-900 rounded-xl border border-slate-700 overflow-hidden">
+      <section className="bg-slate-900 rounded-xl border border-slate-700 overflow-hidden relative">
         <div className="p-6 pb-4">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-2">
             <div>
@@ -1147,16 +1184,16 @@ function DashboardInner() {
                 GW{plannerNextGW ?? data.gameweek + 1} Planner
               </h2>
               <p className="text-sm text-slate-400 mt-1">
-                Tap a player to swap them out, then simulate your scenario
+                Tap a player to transfer or swap with bench
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {plannerTransfers.length > 0 && (
+              {(plannerTransfers.length > 0 || plannerBenchSwaps.length > 0 || plannerChip) && (
                 <button
-                  onClick={() => { setPlannerTransfers([]); setPlannerSelectedSlot(null); setSimulationResult(null); }}
+                  onClick={() => { setPlannerTransfers([]); setPlannerBenchSwaps([]); setPlannerSelectedSlot(null); setPlannerSwapMode(null); setPlannerChip(null); setSimulationResult(null); setSidebarSearch(""); }}
                   className="px-3 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm hover:bg-slate-600 transition-colors"
                 >
-                  Reset
+                  Reset All
                 </button>
               )}
               <button
@@ -1170,7 +1207,7 @@ function DashboardInner() {
           </div>
 
           {/* Transfer info bar */}
-          <div className="flex flex-wrap items-center gap-3 mt-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2 mt-3 text-sm">
             <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
               Bank: <span className="font-semibold text-emerald-400">£{getPlannerBank().toFixed(1)}m</span>
             </span>
@@ -1184,126 +1221,265 @@ function DashboardInner() {
             }`}>
               Hit: <span className="font-semibold">{getPlannerHitCost() > 0 ? `-${getPlannerHitCost()}pts` : "0"}</span>
             </span>
-            <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
-              Transfers: <span className="font-semibold text-purple-400">{plannerTransfers.length}</span>
-            </span>
-            {getRemainingChips().length > 0 && (
-              <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400">
-                Chips: {getRemainingChips().map((c) => {
-                  const labels: Record<string, string> = { wildcard: "WC", freehit: "FH", bboost: "BB", "3xc": "TC" };
-                  return <span key={c} className="text-amber-400 ml-1 font-medium">{labels[c] ?? c}</span>;
-                })}
+            {plannerTransfers.length > 0 && (
+              <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
+                Transfers: <span className="font-semibold text-purple-400">{plannerTransfers.length}</span>
               </span>
             )}
           </div>
+
+          {/* Chip toggle buttons */}
+          {getRemainingChips().length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <span className="text-xs text-slate-500 uppercase tracking-wider mr-1">Chips:</span>
+              {getRemainingChips().map((c) => {
+                const labels: Record<string, string> = { wildcard: "Wildcard", freehit: "Free Hit", bboost: "Bench Boost", "3xc": "Triple Captain" };
+                const shorts: Record<string, string> = { wildcard: "WC", freehit: "FH", bboost: "BB", "3xc": "TC" };
+                const isActive = plannerChip === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      setPlannerChip(isActive ? null : c);
+                      setSimulationResult(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                      isActive
+                        ? "bg-purple-600 text-white border-purple-500 ring-1 ring-purple-400/50"
+                        : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"
+                    }`}
+                    title={labels[c]}
+                  >
+                    {shorts[c]}
+                    {isActive && " \u2713"}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Planner Pitch */}
-        {plannerProjections.length > 0 ? (
-          <PlannerPitch
-            picks={getPlannerSquad()}
-            projections={plannerProjections}
-            allPlayers={plannerAllPlayers}
-            elements={bootstrapElements}
-            teams={bootstrapTeams}
-            captainId={plannerCaptainId ?? captainSuggestions[0]?.element ?? null}
-            selectedSlot={plannerSelectedSlot}
-            onPlayerClick={(elementId) => {
-              if (plannerSelectedSlot === elementId) {
-                setPlannerSelectedSlot(null);
-              } else {
-                setPlannerSelectedSlot(elementId);
-              }
-            }}
-            onCaptainClick={(elementId) => {
-              setPlannerCaptainId(elementId);
-            }}
-            plannerFixtures={plannerFixtures}
-            plannerTeams={plannerTeams}
-            plannerNextGW={plannerNextGW}
-          />
-        ) : fixturesLoading ? (
-          <div className="flex justify-center py-12">
-            <div className="spinner" />
-          </div>
-        ) : (
-          <div className="px-6 pb-6">
-            <p className="text-slate-500 py-4">No projection data available for the next GW</p>
-          </div>
-        )}
-
-        {/* Replacement picker panel */}
-        {plannerSelectedSlot && plannerProjections.length > 0 && (() => {
-          const pick = getPlannerSquad().find((p) => p.element === plannerSelectedSlot);
-          if (!pick) return null;
-          const candidates = getReplacementCandidates(pick.elementType);
-          const bankAvailable = getPlannerBank();
-          const outEl = bootstrapElements.find((e) => e.id === plannerSelectedSlot);
-          const outCost = outEl ? outEl.now_cost / 10 : 0;
-
-          return (
-            <div className="mx-6 mb-4 p-4 rounded-lg bg-slate-800 border border-purple-700/40">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-sm font-semibold text-slate-50">
-                  Replace <span className="text-red-400">{pick.webName}</span> (£{outCost.toFixed(1)}m)
-                </div>
-                <button onClick={() => setPlannerSelectedSlot(null)} className="text-slate-500 hover:text-slate-300 text-sm">
-                  Cancel
-                </button>
+        {/* Planner Pitch + Sidebar layout */}
+        <div className="flex">
+          {/* Pitch area */}
+          <div className={`transition-all duration-300 ${plannerSelectedSlot && plannerSwapMode === "transfer" ? "w-3/5" : "w-full"}`}>
+            {plannerProjections.length > 0 ? (
+              <PlannerPitch
+                picks={getPlannerSquad()}
+                projections={plannerProjections}
+                allPlayers={plannerAllPlayers}
+                elements={bootstrapElements}
+                teams={bootstrapTeams}
+                captainId={plannerCaptainId ?? captainSuggestions[0]?.element ?? null}
+                selectedSlot={plannerSelectedSlot}
+                onPlayerClick={(elementId) => {
+                  if (plannerSelectedSlot === elementId) {
+                    setPlannerSelectedSlot(null);
+                    setPlannerSwapMode(null);
+                    setSidebarSearch("");
+                  } else if (plannerSwapMode === "benchswap" && plannerSelectedSlot) {
+                    // Complete the bench swap
+                    const first = getPlannerSquad().find((p) => p.element === plannerSelectedSlot);
+                    const second = getPlannerSquad().find((p) => p.element === elementId);
+                    if (first && second) {
+                      const firstIsStarter = first.position <= 11;
+                      const secondIsStarter = second.position <= 11;
+                      if (firstIsStarter !== secondIsStarter) {
+                        // One starter, one bench — swap
+                        const starterId = firstIsStarter ? first.element : second.element;
+                        const benchId = firstIsStarter ? second.element : first.element;
+                        setPlannerBenchSwaps([...plannerBenchSwaps, { starterId, benchId }]);
+                        setSimulationResult(null);
+                      }
+                    }
+                    setPlannerSelectedSlot(null);
+                    setPlannerSwapMode(null);
+                  } else {
+                    setPlannerSelectedSlot(elementId);
+                    // Determine mode: if it's a squad player, offer transfer or bench swap
+                    setPlannerSwapMode(null); // Will be chosen by buttons
+                    setSidebarSearch("");
+                  }
+                }}
+                onCaptainClick={(elementId) => {
+                  setPlannerCaptainId(elementId);
+                }}
+                plannerFixtures={plannerFixtures}
+                plannerTeams={plannerTeams}
+                plannerNextGW={plannerNextGW}
+                swapMode={plannerSwapMode}
+                chipActive={plannerChip}
+              />
+            ) : fixturesLoading ? (
+              <div className="flex justify-center py-12">
+                <div className="spinner" />
               </div>
-              <div className="max-h-48 overflow-y-auto space-y-1">
-                {candidates.map((c) => {
-                  const affordable = c.cost <= (bankAvailable + outCost);
-                  return (
-                    <button
-                      key={c.id}
-                      disabled={!affordable}
-                      onClick={() => {
-                        // Remove any existing transfer for this slot
-                        const existing = plannerTransfers.filter((t) => t.outId !== (outEl?.id ?? plannerSelectedSlot));
-                        // Find original player at this position
-                        const originalPick = data.picks.find((p) => p.element === plannerSelectedSlot);
-                        const originalId = originalPick?.element ?? plannerSelectedSlot;
-                        // Check if this is reverting back to original
-                        const revertTransfer = plannerTransfers.find((t) => t.outId === originalId);
-                        if (revertTransfer && c.id === originalId) {
-                          // Just remove the transfer
-                          setPlannerTransfers(existing);
-                        } else {
-                          // If current slot is already a transferred-in player, find the original out
+            ) : (
+              <div className="px-6 pb-6">
+                <p className="text-slate-500 py-4">No projection data available for the next GW</p>
+              </div>
+            )}
+          </div>
+
+          {/* Sidebar — replacement picker */}
+          {plannerSelectedSlot && plannerSwapMode === "transfer" && plannerProjections.length > 0 && (() => {
+            const pick = getPlannerSquad().find((p) => p.element === plannerSelectedSlot);
+            if (!pick) return null;
+            const allCandidates = getReplacementCandidates(pick.elementType);
+            const search = sidebarSearch.toLowerCase();
+            const candidates = search
+              ? allCandidates.filter((c) => c.name.toLowerCase().includes(search) || c.team.toLowerCase().includes(search))
+              : allCandidates;
+            const bankAvailable = getPlannerBank();
+            const outEl = bootstrapElements.find((e) => e.id === plannerSelectedSlot);
+            const outCost = outEl ? outEl.now_cost / 10 : 0;
+            const outTeam = bootstrapTeams.find((t) => t.id === pick.teamId);
+
+            return (
+              <div className="w-2/5 bg-slate-800 border-l border-slate-700 flex flex-col" style={{ minHeight: 480 }}>
+                {/* Sidebar header */}
+                <div className="p-4 border-b border-slate-700">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs text-slate-400 uppercase tracking-wider">Replace Player</span>
+                    <button onClick={() => { setPlannerSelectedSlot(null); setPlannerSwapMode(null); setSidebarSearch(""); }} className="text-slate-500 hover:text-slate-300">
+                      <span className="text-lg">&times;</span>
+                    </button>
+                  </div>
+                  {/* Current player card */}
+                  <div className="flex items-center gap-3 p-2 rounded-lg bg-red-900/20 border border-red-700/30 mb-3">
+                    {outTeam && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={`https://fantasy.premierleague.com/dist/img/shirts/standard/shirt_${outTeam.code}-110.webp`}
+                        alt=""
+                        width={32}
+                        height={32}
+                        loading="eager"
+                        style={{ objectFit: "contain" }}
+                      />
+                    )}
+                    <div>
+                      <div className="text-sm font-semibold text-red-400">{pick.webName}</div>
+                      <div className="text-xs text-slate-500">{outTeam?.short_name} | £{outCost.toFixed(1)}m</div>
+                    </div>
+                    <span className="ml-auto text-xs text-red-400/70 font-medium">OUT</span>
+                  </div>
+                  {/* Search */}
+                  <input
+                    type="text"
+                    value={sidebarSearch}
+                    onChange={(e) => setSidebarSearch(e.target.value)}
+                    placeholder="Search player or team..."
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                    autoFocus
+                  />
+                </div>
+                {/* Player list */}
+                <div className="flex-1 overflow-y-auto">
+                  {candidates.map((c) => {
+                    const affordable = c.cost <= (bankAvailable + outCost);
+                    const cTeam = bootstrapTeams.find((t) => t.short_name === c.team);
+                    return (
+                      <button
+                        key={c.id}
+                        disabled={!affordable}
+                        onClick={() => {
                           const origOut = plannerTransfers.find((t) => t.inId === plannerSelectedSlot);
                           const realOutId = origOut ? origOut.outId : plannerSelectedSlot;
                           const cleaned = plannerTransfers.filter((t) => t.outId !== realOutId);
                           setPlannerTransfers([...cleaned, { outId: realOutId, inId: c.id }]);
-                        }
-                        setPlannerSelectedSlot(null);
-                        setSimulationResult(null);
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors ${
-                        affordable
-                          ? "hover:bg-slate-700 text-slate-200"
-                          : "opacity-40 cursor-not-allowed text-slate-500"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="font-medium">{c.name}</span>
-                        <span className="text-slate-500">{c.team}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-400">{c.eo}% EO</span>
-                        <span className="text-emerald-400 font-semibold">{c.xPts} xPts</span>
-                        <span className={affordable ? "text-slate-400" : "text-red-400"}>£{c.cost.toFixed(1)}m</span>
-                      </div>
-                    </button>
-                  );
-                })}
-                {candidates.length === 0 && (
-                  <p className="text-slate-500 text-sm py-2">No replacements available</p>
-                )}
+                          setPlannerSelectedSlot(null);
+                          setPlannerSwapMode(null);
+                          setSimulationResult(null);
+                          setSidebarSearch("");
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 border-b border-slate-700/50 transition-colors ${
+                          affordable
+                            ? "hover:bg-slate-700/50 text-slate-200"
+                            : "opacity-40 cursor-not-allowed text-slate-500"
+                        }`}
+                      >
+                        {cTeam && (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={`https://fantasy.premierleague.com/dist/img/shirts/standard/shirt_${cTeam.code}-110.webp`}
+                            alt=""
+                            width={28}
+                            height={28}
+                            loading="eager"
+                            style={{ objectFit: "contain" }}
+                          />
+                        )}
+                        <div className="flex-1 text-left">
+                          <div className="text-sm font-medium">{c.name}</div>
+                          <div className="text-xs text-slate-500">{c.team} | {c.eo}% EO</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-bold text-emerald-400">{c.xPts}</div>
+                          <div className={`text-xs ${affordable ? "text-slate-400" : "text-red-400"}`}>£{c.cost.toFixed(1)}m</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {candidates.length === 0 && (
+                    <p className="text-slate-500 text-sm py-6 text-center">No players found</p>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Action buttons when player is selected but no mode chosen yet */}
+        {plannerSelectedSlot && !plannerSwapMode && plannerProjections.length > 0 && (
+          <div className="mx-6 mb-4 p-4 rounded-lg bg-slate-800 border border-purple-700/40">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-300">
+                Selected: <span className="font-semibold text-slate-50">{getPlannerSquad().find((p) => p.element === plannerSelectedSlot)?.webName}</span>
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPlannerSwapMode("transfer")}
+                  className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-500 transition-colors"
+                >
+                  Transfer Out
+                </button>
+                <button
+                  onClick={() => setPlannerSwapMode("benchswap")}
+                  className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-500 transition-colors"
+                >
+                  Swap with Bench/Starter
+                </button>
+                <button
+                  onClick={() => { setPlannerSelectedSlot(null); setPlannerSwapMode(null); }}
+                  className="px-3 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm hover:bg-slate-600 transition-colors"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
-          );
-        })()}
+            {plannerSwapMode === "benchswap" && (
+              <p className="text-xs text-amber-400/70 mt-2">Now tap the player you want to swap with</p>
+            )}
+          </div>
+        )}
+
+        {/* Bench swap mode indicator */}
+        {plannerSwapMode === "benchswap" && plannerSelectedSlot && (
+          <div className="mx-6 mb-4 p-3 rounded-lg bg-amber-900/20 border border-amber-700/40">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-amber-300">
+                Tap a {getPlannerSquad().find((p) => p.element === plannerSelectedSlot)?.position! <= 11 ? "bench" : "starting"} player to swap with <span className="font-semibold">{getPlannerSquad().find((p) => p.element === plannerSelectedSlot)?.webName}</span>
+              </span>
+              <button
+                onClick={() => { setPlannerSelectedSlot(null); setPlannerSwapMode(null); }}
+                className="text-slate-500 hover:text-slate-300 text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Captain Recommendation */}
         {captainSuggestions.length > 0 && plannerProjections.length > 0 && (
@@ -1408,6 +1584,8 @@ function PlannerPitch({
   plannerFixtures,
   plannerTeams,
   plannerNextGW,
+  swapMode,
+  chipActive,
 }: {
   picks: EnrichedPick[];
   projections: XPtsProjection[];
@@ -1421,6 +1599,8 @@ function PlannerPitch({
   plannerFixtures: FixtureDetail[];
   plannerTeams: TeamStrength[];
   plannerNextGW: number | null;
+  swapMode?: "transfer" | "benchswap" | null;
+  chipActive?: string | null;
 }) {
   // Build projections for the effective squad
   const squadIds = picks.map((p) => p.element);
@@ -1599,12 +1779,14 @@ function PlannerPitch({
       </div>
 
       {/* Bench */}
-      <div className="p-4 bg-slate-800/30 border-t border-slate-700">
-        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-          Bench
+      <div className={`p-4 border-t ${chipActive === "bboost" ? "bg-purple-900/20 border-purple-700/50" : "bg-slate-800/30 border-slate-700"}`}>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Bench</span>
+          {chipActive === "bboost" && <span className="text-[10px] font-semibold text-purple-300 bg-purple-800/60 px-1.5 py-0.5 rounded">BB</span>}
+          {swapMode === "benchswap" && <span className="text-[10px] font-semibold text-amber-300 bg-amber-800/40 px-1.5 py-0.5 rounded animate-pulse">TAP TO SWAP</span>}
         </div>
         <div className="flex justify-center gap-4">
-          {bench.map((pick) => renderPlannerCard(pick, true))}
+          {bench.map((pick) => renderPlannerCard(pick, chipActive !== "bboost"))}
         </div>
       </div>
     </div>

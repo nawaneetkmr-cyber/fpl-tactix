@@ -255,6 +255,9 @@ export async function GET(req: Request) {
       captainIdForSafety
     );
 
+    // Active chip for this GW (from picks endpoint)
+    const activeChip: string | null = picksData.active_chip ?? null;
+
     // Extract bank & free transfers for planner
     const bankValue = (picksData.entry_history?.bank ?? 0) / 10;
     let freeTransfersValue = 1;
@@ -297,6 +300,7 @@ export async function GET(req: Request) {
       bank: bankValue,
       freeTransfers: freeTransfersValue,
       chipsUsed,
+      activeChip,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
