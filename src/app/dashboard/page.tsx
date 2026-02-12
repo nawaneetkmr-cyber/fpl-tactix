@@ -87,6 +87,9 @@ interface DashboardData {
   picks: EnrichedPick[];
   elements: { id: number; web_name: string; team: number; element_type: number }[];
   teams: { id: number; name: string; shortName: string }[];
+  bank?: number;
+  freeTransfers?: number;
+  chipsUsed?: string[];
   error?: string;
 }
 
@@ -160,6 +163,12 @@ function DashboardInner() {
   const [plannerFixtures, setPlannerFixtures] = useState<FixtureDetail[]>([]);
   const [plannerTeams, setPlannerTeams] = useState<TeamStrength[]>([]);
   const [plannerNextGW, setPlannerNextGW] = useState<number | null>(null);
+
+  // Planner transfer simulation state
+  interface PlannerTransfer { outId: number; inId: number; }
+  const [plannerTransfers, setPlannerTransfers] = useState<PlannerTransfer[]>([]);
+  const [plannerSelectedSlot, setPlannerSelectedSlot] = useState<number | null>(null); // element id of player being swapped
+  const [plannerCaptainId, setPlannerCaptainId] = useState<number | null>(null);
   const [simulationResult, setSimulationResult] = useState<{
     totalXPts: number;
     startingXPts: number;
@@ -168,6 +177,8 @@ function DashboardInner() {
     pros: string[];
     cons: string[];
     benchXPts: number;
+    hitCost: number;
+    netXPts: number;
   } | null>(null);
   const [simulating, setSimulating] = useState(false);
 
@@ -367,17 +378,107 @@ function DashboardInner() {
     };
   }, [data]);
 
+  // Build the "effective squad" after planner transfers are applied
+  function getPlannerSquad(): EnrichedPick[] {
+    if (!data) return [];
+    let squad = [...data.picks];
+    for (const t of plannerTransfers) {
+      const outIdx = squad.findIndex((p) => p.element === t.outId);
+      if (outIdx === -1) continue;
+      const inEl = plannerAllPlayers.find((p) => p.id === t.inId);
+      if (!inEl) continue;
+      squad[outIdx] = {
+        ...squad[outIdx],
+        element: inEl.id,
+        webName: inEl.web_name,
+        teamId: inEl.team,
+        elementType: inEl.element_type,
+      };
+    }
+    return squad;
+  }
+
+  // Get planner bank after transfers
+  function getPlannerBank(): number {
+    const baseBank = data?.bank ?? 0;
+    let bank = baseBank;
+    for (const t of plannerTransfers) {
+      const outEl = bootstrapElements.find((e) => e.id === t.outId);
+      const inEl = plannerAllPlayers.find((e) => e.id === t.inId);
+      if (outEl && inEl) {
+        bank += (outEl.now_cost - inEl.now_cost) / 10;
+      }
+    }
+    return Math.round(bank * 10) / 10;
+  }
+
+  // Compute hits
+  function getPlannerHitCost(): number {
+    const ft = data?.freeTransfers ?? 1;
+    const extraTransfers = Math.max(0, plannerTransfers.length - ft);
+    return extraTransfers * 4;
+  }
+
+  // Available chips
+  function getRemainingChips(): string[] {
+    const allChips = ["wildcard", "freehit", "bboost", "3xc"];
+    const used = data?.chipsUsed ?? [];
+    return allChips.filter((c) => !used.includes(c));
+  }
+
+  // Get replacement candidates for a position
+  function getReplacementCandidates(elementType: number): { id: number; name: string; team: string; xPts: number; cost: number; eo: string }[] {
+    const projMap = new Map(plannerProjections.map((p) => [p.player_id, p]));
+    const squadIds = new Set(getPlannerSquad().map((p) => p.element));
+    const teamMap = new Map(plannerTeams.map((t) => [t.id, t]));
+
+    // Get all projections for this position, not just squad
+    const allProjs = plannerNextGW
+      ? calculatePlayerProjections(
+          plannerAllPlayers.filter((p) => p.element_type === elementType),
+          plannerTeams,
+          plannerFixtures,
+          plannerNextGW
+        )
+      : [];
+
+    return allProjs
+      .filter((p) => !squadIds.has(p.player_id) && p.expected_points > 0.5)
+      .sort((a, b) => b.expected_points - a.expected_points)
+      .slice(0, 15)
+      .map((p) => {
+        const el = plannerAllPlayers.find((e) => e.id === p.player_id);
+        return {
+          id: p.player_id,
+          name: p.web_name,
+          team: teamMap.get(p.team_id)?.short_name ?? "?",
+          xPts: Math.round(p.expected_points * 10) / 10,
+          cost: el ? el.now_cost / 10 : 0,
+          eo: el?.selected_by_percent ?? "0",
+        };
+      });
+  }
+
   function runSimulation() {
     if (!data || plannerProjections.length === 0 || !plannerNextGW) return;
     setSimulating(true);
 
-    const projMap = new Map(plannerProjections.map((p) => [p.player_id, p]));
+    const squad = getPlannerSquad();
+    const hitCost = getPlannerHitCost();
 
-    // Find starters (position <= 11) and bench
-    const starters = data.picks.filter((p) => p.position <= 11);
-    const bench = data.picks.filter((p) => p.position > 11);
+    // Recompute projections for the effective squad
+    const squadIds = squad.map((p) => p.element);
+    const effectiveProjections = calculatePlayerProjections(
+      plannerAllPlayers.filter((p) => squadIds.includes(p.id)),
+      plannerTeams,
+      plannerFixtures,
+      plannerNextGW
+    );
+    const projMap = new Map(effectiveProjections.map((p) => [p.player_id, p]));
 
-    // Map projections to picks
+    const starters = squad.filter((p) => p.position <= 11);
+    const bench = squad.filter((p) => p.position > 11);
+
     const starterProjs = starters
       .map((pick) => ({ pick, proj: projMap.get(pick.element) }))
       .filter((x) => x.proj);
@@ -388,21 +489,28 @@ function DashboardInner() {
     const startingXPts = starterProjs.reduce((s, x) => s + (x.proj?.expected_points ?? 0), 0);
     const benchXPts = benchProjs.reduce((s, x) => s + (x.proj?.expected_points ?? 0), 0);
 
-    // Captain: best xPts among starters
-    const bestCaptain = starterProjs.reduce(
-      (best, x) => ((x.proj?.expected_points ?? 0) > (best.proj?.expected_points ?? 0) ? x : best),
-      starterProjs[0]
-    );
-    const captainXPts = bestCaptain?.proj?.expected_points ?? 0;
-    const captainName = bestCaptain?.pick.webName ?? "Unknown";
+    // Captain: use planner captain if set, else best xPts among starters
+    let captainEl: typeof starterProjs[0] | undefined;
+    if (plannerCaptainId) {
+      captainEl = starterProjs.find((x) => x.pick.element === plannerCaptainId);
+    }
+    if (!captainEl) {
+      captainEl = starterProjs.reduce(
+        (best, x) => ((x.proj?.expected_points ?? 0) > (best.proj?.expected_points ?? 0) ? x : best),
+        starterProjs[0]
+      );
+    }
+    const captainXPts = captainEl?.proj?.expected_points ?? 0;
+    const captainName = captainEl?.pick.webName ?? "Unknown";
 
-    const totalXPts = startingXPts + captainXPts; // captain counted twice
+    const totalXPts = startingXPts + captainXPts;
+    const netXPts = totalXPts - hitCost;
 
-    // Generate pros and cons
+    // Generate ALWAYS-meaningful pros and cons
     const pros: string[] = [];
     const cons: string[] = [];
 
-    // Check for high-xPts players
+    // --- Pros analysis ---
     const highPerformers = starterProjs.filter((x) => (x.proj?.expected_points ?? 0) >= 5);
     if (highPerformers.length >= 3) {
       pros.push(`${highPerformers.length} players projected 5+ xPts — strong ceiling`);
@@ -410,55 +518,108 @@ function DashboardInner() {
       pros.push(`${highPerformers.length} player(s) with 5+ xPts projection`);
     }
 
-    // Captain strength
     if (captainXPts >= 6) {
-      pros.push(`Strong captain pick: ${captainName} at ${captainXPts.toFixed(1)} xPts`);
-    } else if (captainXPts < 4) {
+      pros.push(`Strong captain: ${captainName} at ${captainXPts.toFixed(1)} xPts (x2)`);
+    }
+
+    const lowRisk = starterProjs.filter((x) => x.proj?.risk_rating === "low");
+    if (lowRisk.length >= 8) {
+      pros.push(`${lowRisk.length}/11 starters are nailed — reliable lineup`);
+    }
+
+    const csPlayers = starterProjs.filter(
+      (x) => x.proj && x.proj.clean_sheet_probability >= 0.35 && (x.pick.elementType <= 2)
+    );
+    if (csPlayers.length >= 3) {
+      pros.push(`${csPlayers.length} DEF/GK with 35%+ clean sheet probability`);
+    }
+
+    if (benchXPts >= 10) {
+      pros.push(`Strong bench cover: ${benchXPts.toFixed(1)} xPts total`);
+    }
+
+    if (plannerTransfers.length > 0 && hitCost === 0) {
+      pros.push(`${plannerTransfers.length} free transfer(s) — no hit cost`);
+    }
+
+    if (totalXPts >= 55) {
+      pros.push(`Projected ${totalXPts.toFixed(1)} xPts — green arrow territory`);
+    }
+
+    // --- Cons analysis (ALWAYS generate at least 2) ---
+    const highRisk = starterProjs.filter((x) => x.proj?.risk_rating === "high");
+    if (highRisk.length > 0) {
+      const names = highRisk.map((x) => x.pick.webName).join(", ");
+      cons.push(`${highRisk.length} starter(s) rotation/injury risk: ${names}`);
+    }
+
+    const mediumRisk = starterProjs.filter((x) => x.proj?.risk_rating === "medium");
+    if (mediumRisk.length >= 3) {
+      cons.push(`${mediumRisk.length} starters with moderate risk — lineups uncertain`);
+    }
+
+    if (captainXPts < 4.5) {
       cons.push(`Weak captain options — best is ${captainName} at ${captainXPts.toFixed(1)} xPts`);
     }
 
-    // Check for low-risk starters
-    const lowRisk = starterProjs.filter((x) => x.proj?.risk_rating === "low");
-    if (lowRisk.length >= 8) {
-      pros.push(`${lowRisk.length}/11 starters are low-risk — reliable lineup`);
-    }
-
-    // Check for high-risk starters
-    const highRisk = starterProjs.filter((x) => x.proj?.risk_rating === "high");
-    if (highRisk.length >= 2) {
-      cons.push(`${highRisk.length} starter(s) flagged high-risk (rotation/injury doubt)`);
-    }
-
-    // Check for blanking players (no fixture)
     const blanking = starterProjs.filter((x) => (x.proj?.expected_points ?? 0) === 0);
     if (blanking.length > 0) {
-      cons.push(`${blanking.length} starter(s) have no fixture this GW — bench boost risk`);
+      const names = blanking.map((x) => x.pick.webName).join(", ");
+      cons.push(`${blanking.length} starter(s) blank this GW: ${names}`);
     }
 
-    // Clean sheet potential
-    const csPlayers = starterProjs.filter(
-      (x) => x.proj && x.proj.clean_sheet_probability >= 0.35 && (x.pick.elementType === 1 || x.pick.elementType === 2)
-    );
-    if (csPlayers.length >= 3) {
-      pros.push(`${csPlayers.length} defenders/GK with 35%+ CS probability`);
-    }
-
-    // Low bench
     if (benchXPts < 6) {
-      cons.push(`Bench is weak at ${benchXPts.toFixed(1)} total xPts — auto-sub risk`);
-    } else if (benchXPts >= 10) {
-      pros.push(`Strong bench: ${benchXPts.toFixed(1)} xPts — good auto-sub cover`);
+      cons.push(`Weak bench at ${benchXPts.toFixed(1)} xPts — auto-sub insurance poor`);
     }
 
-    // Total assessment
-    if (totalXPts >= 55) {
-      pros.push(`Projected ${totalXPts.toFixed(1)} total xPts — green arrow territory`);
-    } else if (totalXPts < 40) {
-      cons.push(`Only ${totalXPts.toFixed(1)} total xPts projected — consider transfers`);
+    if (hitCost > 0) {
+      cons.push(`Taking a ${hitCost}pt hit — net total drops to ${netXPts.toFixed(1)} xPts`);
     }
 
-    if (pros.length === 0) pros.push("Balanced squad with no standout strengths");
-    if (cons.length === 0) cons.push("No major concerns identified");
+    // Low-xPts starters
+    const underperformers = starterProjs.filter((x) => (x.proj?.expected_points ?? 0) < 2.5 && (x.proj?.expected_points ?? 0) > 0);
+    if (underperformers.length >= 2) {
+      const names = underperformers.map((x) => `${x.pick.webName} (${(x.proj?.expected_points ?? 0).toFixed(1)})`).join(", ");
+      cons.push(`${underperformers.length} starters projected under 2.5 xPts: ${names}`);
+    }
+
+    // Fixture difficulty — players facing FDR 4-5
+    const toughFixtures = starterProjs.filter((x) => {
+      if (!x.proj) return false;
+      // High risk + low CS prob indicates tough fixture
+      return x.proj.goal_threat_score < 0.1 && x.proj.expected_points < 3 && x.pick.elementType >= 3;
+    });
+    if (toughFixtures.length >= 3) {
+      cons.push(`${toughFixtures.length} attacking players with low goal threat this GW`);
+    }
+
+    // Ownership concentration
+    const highEO = starterProjs.filter((x) => {
+      const el = plannerAllPlayers.find((e) => e.id === x.pick.element);
+      return el && parseFloat(el.selected_by_percent || "0") > 30;
+    });
+    if (highEO.length >= 6) {
+      pros.push(`${highEO.length} template picks — safe floor against average`);
+    }
+
+    const diffPicks = starterProjs.filter((x) => {
+      const el = plannerAllPlayers.find((e) => e.id === x.pick.element);
+      return el && parseFloat(el.selected_by_percent || "0") < 5 && (x.proj?.expected_points ?? 0) >= 4;
+    });
+    if (diffPicks.length >= 1) {
+      const names = diffPicks.map((x) => x.pick.webName).join(", ");
+      pros.push(`Differential edge: ${names} (<5% EO, 4+ xPts)`);
+    }
+
+    // Ensure at least 1 pro and 2 cons always
+    if (pros.length === 0) {
+      const avgXPts = startingXPts / Math.max(starterProjs.length, 1);
+      pros.push(`Average starter xPts: ${avgXPts.toFixed(1)} — ${avgXPts >= 3.5 ? "decent" : "needs improvement"}`);
+    }
+    if (cons.length < 2) {
+      if (totalXPts < 50) cons.push(`Total xPts (${totalXPts.toFixed(1)}) below 50 — red arrow risk`);
+      if (cons.length < 2) cons.push(`Limited differential upside — similar to template managers`);
+    }
 
     setSimulationResult({
       totalXPts: Math.round(totalXPts * 10) / 10,
@@ -468,6 +629,8 @@ function DashboardInner() {
       pros,
       cons,
       benchXPts: Math.round(benchXPts * 10) / 10,
+      hitCost,
+      netXPts: Math.round(netXPts * 10) / 10,
     });
     setSimulating(false);
   }
@@ -822,7 +985,7 @@ function DashboardInner() {
             {/* Optimized lineup preview */}
             {data.milpOptimization.captain && (
               <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50 mt-2">
-                <div className="text-xs text-slate-400 uppercase tracking-wider mb-2">Optimized XI Captain</div>
+                <div className="text-xs text-slate-400 uppercase tracking-wider mb-2">Optimized Captain (after transfers)</div>
                 <span className="text-slate-50 font-semibold">
                   {data.milpOptimization.captain.name}
                 </span>
@@ -891,11 +1054,14 @@ function DashboardInner() {
         )}
       </section>
 
-      {/* ===== SECTION 4: CAPTAIN PICK ===== */}
+      {/* ===== SECTION 4: CAPTAIN PICK (NEXT GW) ===== */}
       <section className="bg-slate-900 rounded-xl border border-slate-700 p-6">
-        <h2 className="text-2xl font-bold text-slate-50 mb-6">
-          Captain Pick (GW{captainGW ?? data.gameweek})
+        <h2 className="text-2xl font-bold text-slate-50 mb-1">
+          Captain Pick — Next GW{captainGW ?? data.gameweek + 1}
         </h2>
+        <p className="text-sm text-slate-400 mb-6">
+          Best captain from your <span className="text-slate-300">current squad</span> for the upcoming gameweek
+        </p>
         {fixturesLoading ? (
           <div className="flex justify-center py-8">
             <div className="spinner" />
@@ -972,7 +1138,7 @@ function DashboardInner() {
         )}
       </section>
 
-      {/* ===== SECTION 6: GW PLANNER — PITCH VIEW WITH xPts SIMULATION ===== */}
+      {/* ===== SECTION 6: GW PLANNER — PITCH VIEW WITH TRANSFER SIMULATION ===== */}
       <section className="bg-slate-900 rounded-xl border border-slate-700 overflow-hidden">
         <div className="p-6 pb-4">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-2">
@@ -981,27 +1147,80 @@ function DashboardInner() {
                 GW{plannerNextGW ?? data.gameweek + 1} Planner
               </h2>
               <p className="text-sm text-slate-400 mt-1">
-                Simulate expected points for your squad&apos;s upcoming gameweek
+                Tap a player to swap them out, then simulate your scenario
               </p>
             </div>
-            <button
-              onClick={runSimulation}
-              disabled={simulating || plannerProjections.length === 0}
-              className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white font-semibold text-sm hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-purple-900/30"
-            >
-              {simulating ? "Simulating..." : "Simulate Scenario"}
-            </button>
+            <div className="flex items-center gap-2">
+              {plannerTransfers.length > 0 && (
+                <button
+                  onClick={() => { setPlannerTransfers([]); setPlannerSelectedSlot(null); setSimulationResult(null); }}
+                  className="px-3 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm hover:bg-slate-600 transition-colors"
+                >
+                  Reset
+                </button>
+              )}
+              <button
+                onClick={runSimulation}
+                disabled={simulating || plannerProjections.length === 0}
+                className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white font-semibold text-sm hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-purple-900/30"
+              >
+                {simulating ? "Simulating..." : "Simulate Scenario"}
+              </button>
+            </div>
+          </div>
+
+          {/* Transfer info bar */}
+          <div className="flex flex-wrap items-center gap-3 mt-3 text-sm">
+            <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
+              Bank: <span className="font-semibold text-emerald-400">£{getPlannerBank().toFixed(1)}m</span>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
+              FT: <span className="font-semibold text-slate-50">{data.freeTransfers ?? 1}</span>
+            </span>
+            <span className={`px-2.5 py-1 rounded border ${
+              getPlannerHitCost() > 0
+                ? "bg-red-900/30 border-red-700/40 text-red-400"
+                : "bg-slate-800 border-slate-700 text-slate-400"
+            }`}>
+              Hit: <span className="font-semibold">{getPlannerHitCost() > 0 ? `-${getPlannerHitCost()}pts` : "0"}</span>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300">
+              Transfers: <span className="font-semibold text-purple-400">{plannerTransfers.length}</span>
+            </span>
+            {getRemainingChips().length > 0 && (
+              <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400">
+                Chips: {getRemainingChips().map((c) => {
+                  const labels: Record<string, string> = { wildcard: "WC", freehit: "FH", bboost: "BB", "3xc": "TC" };
+                  return <span key={c} className="text-amber-400 ml-1 font-medium">{labels[c] ?? c}</span>;
+                })}
+              </span>
+            )}
           </div>
         </div>
 
         {/* Planner Pitch */}
         {plannerProjections.length > 0 ? (
           <PlannerPitch
-            picks={data.picks}
+            picks={getPlannerSquad()}
             projections={plannerProjections}
+            allPlayers={plannerAllPlayers}
             elements={bootstrapElements}
             teams={bootstrapTeams}
-            captainSuggestion={captainSuggestions[0] ?? null}
+            captainId={plannerCaptainId ?? captainSuggestions[0]?.element ?? null}
+            selectedSlot={plannerSelectedSlot}
+            onPlayerClick={(elementId) => {
+              if (plannerSelectedSlot === elementId) {
+                setPlannerSelectedSlot(null);
+              } else {
+                setPlannerSelectedSlot(elementId);
+              }
+            }}
+            onCaptainClick={(elementId) => {
+              setPlannerCaptainId(elementId);
+            }}
+            plannerFixtures={plannerFixtures}
+            plannerTeams={plannerTeams}
+            plannerNextGW={plannerNextGW}
           />
         ) : fixturesLoading ? (
           <div className="flex justify-center py-12">
@@ -1012,6 +1231,79 @@ function DashboardInner() {
             <p className="text-slate-500 py-4">No projection data available for the next GW</p>
           </div>
         )}
+
+        {/* Replacement picker panel */}
+        {plannerSelectedSlot && plannerProjections.length > 0 && (() => {
+          const pick = getPlannerSquad().find((p) => p.element === plannerSelectedSlot);
+          if (!pick) return null;
+          const candidates = getReplacementCandidates(pick.elementType);
+          const bankAvailable = getPlannerBank();
+          const outEl = bootstrapElements.find((e) => e.id === plannerSelectedSlot);
+          const outCost = outEl ? outEl.now_cost / 10 : 0;
+
+          return (
+            <div className="mx-6 mb-4 p-4 rounded-lg bg-slate-800 border border-purple-700/40">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-slate-50">
+                  Replace <span className="text-red-400">{pick.webName}</span> (£{outCost.toFixed(1)}m)
+                </div>
+                <button onClick={() => setPlannerSelectedSlot(null)} className="text-slate-500 hover:text-slate-300 text-sm">
+                  Cancel
+                </button>
+              </div>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {candidates.map((c) => {
+                  const affordable = c.cost <= (bankAvailable + outCost);
+                  return (
+                    <button
+                      key={c.id}
+                      disabled={!affordable}
+                      onClick={() => {
+                        // Remove any existing transfer for this slot
+                        const existing = plannerTransfers.filter((t) => t.outId !== (outEl?.id ?? plannerSelectedSlot));
+                        // Find original player at this position
+                        const originalPick = data.picks.find((p) => p.element === plannerSelectedSlot);
+                        const originalId = originalPick?.element ?? plannerSelectedSlot;
+                        // Check if this is reverting back to original
+                        const revertTransfer = plannerTransfers.find((t) => t.outId === originalId);
+                        if (revertTransfer && c.id === originalId) {
+                          // Just remove the transfer
+                          setPlannerTransfers(existing);
+                        } else {
+                          // If current slot is already a transferred-in player, find the original out
+                          const origOut = plannerTransfers.find((t) => t.inId === plannerSelectedSlot);
+                          const realOutId = origOut ? origOut.outId : plannerSelectedSlot;
+                          const cleaned = plannerTransfers.filter((t) => t.outId !== realOutId);
+                          setPlannerTransfers([...cleaned, { outId: realOutId, inId: c.id }]);
+                        }
+                        setPlannerSelectedSlot(null);
+                        setSimulationResult(null);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors ${
+                        affordable
+                          ? "hover:bg-slate-700 text-slate-200"
+                          : "opacity-40 cursor-not-allowed text-slate-500"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="font-medium">{c.name}</span>
+                        <span className="text-slate-500">{c.team}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-400">{c.eo}% EO</span>
+                        <span className="text-emerald-400 font-semibold">{c.xPts} xPts</span>
+                        <span className={affordable ? "text-slate-400" : "text-red-400"}>£{c.cost.toFixed(1)}m</span>
+                      </div>
+                    </button>
+                  );
+                })}
+                {candidates.length === 0 && (
+                  <p className="text-slate-500 text-sm py-2">No replacements available</p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Captain Recommendation */}
         {captainSuggestions.length > 0 && plannerProjections.length > 0 && (
@@ -1043,7 +1335,7 @@ function DashboardInner() {
         {simulationResult && (
           <div className="mx-6 mb-6 space-y-4">
             {/* Summary stats */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
                 <div className="text-xs text-slate-400 uppercase">Total xPts</div>
                 <div className="text-2xl font-bold text-emerald-400">{simulationResult.totalXPts.toFixed(1)}</div>
@@ -1061,6 +1353,12 @@ function DashboardInner() {
                 <div className="text-xs text-slate-400 uppercase">Bench Cover</div>
                 <div className="text-2xl font-bold text-slate-400">{simulationResult.benchXPts.toFixed(1)}</div>
               </div>
+              {simulationResult.hitCost > 0 && (
+                <div className="p-3 rounded-lg bg-red-900/30 border border-red-700/40">
+                  <div className="text-xs text-red-400 uppercase">Net (after hit)</div>
+                  <div className="text-2xl font-bold text-red-400">{simulationResult.netXPts.toFixed(1)}</div>
+                </div>
+              )}
             </div>
 
             {/* Pros and Cons */}
@@ -1100,57 +1398,124 @@ function DashboardInner() {
 function PlannerPitch({
   picks,
   projections,
+  allPlayers,
   elements,
   teams,
-  captainSuggestion,
+  captainId,
+  selectedSlot,
+  onPlayerClick,
+  onCaptainClick,
+  plannerFixtures,
+  plannerTeams,
+  plannerNextGW,
 }: {
   picks: EnrichedPick[];
   projections: XPtsProjection[];
+  allPlayers: FullElement[];
   elements: BootstrapElement[];
   teams: BootstrapTeam[];
-  captainSuggestion: { element: number; webName: string; xPts: number } | null;
+  captainId: number | null;
+  selectedSlot: number | null;
+  onPlayerClick: (elementId: number) => void;
+  onCaptainClick: (elementId: number) => void;
+  plannerFixtures: FixtureDetail[];
+  plannerTeams: TeamStrength[];
+  plannerNextGW: number | null;
 }) {
-  const projMap = new Map(projections.map((p) => [p.player_id, p]));
+  // Build projections for the effective squad
+  const squadIds = picks.map((p) => p.element);
+  const effectiveProjs = plannerNextGW
+    ? calculatePlayerProjections(
+        allPlayers.filter((p) => squadIds.includes(p.id)),
+        plannerTeams,
+        plannerFixtures,
+        plannerNextGW
+      )
+    : projections;
+  const projMap = new Map(effectiveProjs.map((p) => [p.player_id, p]));
   const teamMap = new Map(teams.map((t) => [t.id, t]));
 
   const starters = picks.filter((p) => p.position <= 11);
   const bench = picks.filter((p) => p.position > 11);
 
-  // Group starters by position
   const gkp = starters.filter((p) => p.elementType === 1);
   const def = starters.filter((p) => p.elementType === 2);
   const mid = starters.filter((p) => p.elementType === 3);
   const fwd = starters.filter((p) => p.elementType === 4);
 
-  const isSuggestedCaptain = (elementId: number) =>
-    captainSuggestion?.element === elementId;
-
   const renderPlannerCard = (pick: EnrichedPick, isBench = false) => {
     const proj = projMap.get(pick.element);
+    const el = allPlayers.find((e) => e.id === pick.element);
     const team = teamMap.get(pick.teamId);
     const xPts = proj?.expected_points ?? 0;
     const risk = proj?.risk_rating ?? "medium";
-    const isCaptainPick = isSuggestedCaptain(pick.element);
+    const isCaptainPick = captainId === pick.element;
+    const isSelected = selectedSlot === pick.element;
+    const eo = el ? parseFloat(el.selected_by_percent || "0") : 0;
 
-    const riskColor =
-      risk === "low" ? "text-emerald-400" : risk === "medium" ? "text-yellow-400" : "text-red-400";
-    const riskBg =
-      risk === "low" ? "bg-emerald-500/10" : risk === "medium" ? "bg-yellow-500/10" : "bg-red-500/10";
+    // Status-based icon logic
+    const status = el?.status ?? "a";
+    const chanceOfPlaying = el?.chance_of_playing_next_round;
+
+    // Determine icon: doubtful, injured, rotation risk, differential, nailed
+    let statusIcon = "";
+    let statusTitle = "";
+    let statusColor = "text-slate-500";
+
+    if (status === "i" || status === "s" || status === "n") {
+      statusIcon = "\u2718"; // ✘ cross
+      statusTitle = status === "i" ? "Injured" : status === "s" ? "Suspended" : "Unavailable";
+      statusColor = "text-red-400";
+    } else if (status === "d" || (chanceOfPlaying !== null && chanceOfPlaying !== undefined && chanceOfPlaying <= 50)) {
+      statusIcon = "\u26A0"; // ⚠ warning
+      statusTitle = "Doubtful";
+      statusColor = "text-amber-400";
+    } else if (risk === "high") {
+      statusIcon = "\u21BB"; // ↻ rotation
+      statusTitle = "Rotation risk";
+      statusColor = "text-orange-400";
+    } else if (eo < 5 && xPts >= 3) {
+      statusIcon = "\u2606"; // ☆ star outline
+      statusTitle = "Differential (<5% EO)";
+      statusColor = "text-purple-400";
+    } else if (risk === "low") {
+      statusIcon = "\u2714"; // ✔ check
+      statusTitle = "Nailed";
+      statusColor = "text-emerald-400";
+    } else {
+      statusIcon = "\u25CF"; // ● dot
+      statusTitle = "Regular";
+      statusColor = "text-slate-400";
+    }
+
+    const xPtsColor = xPts >= 5 ? "text-emerald-400" : xPts >= 3 ? "text-yellow-300" : xPts > 0 ? "text-orange-400" : "text-red-400";
 
     return (
       <div
         key={pick.element}
-        className={`flex flex-col items-center ${isBench ? "opacity-60" : ""}`}
-        style={{ width: 80 }}
+        className={`flex flex-col items-center cursor-pointer transition-all ${
+          isBench ? "opacity-60 hover:opacity-90" : ""
+        } ${isSelected ? "scale-110" : "hover:scale-105"}`}
+        style={{ width: 82 }}
+        onClick={() => onPlayerClick(pick.element)}
       >
-        {/* xPts bubble */}
-        <div className={`relative rounded-lg px-2 py-1 ${riskBg} border ${
-          isCaptainPick ? "border-yellow-500 ring-1 ring-yellow-500/30" : "border-slate-700"
+        {/* xPts card */}
+        <div className={`relative rounded-lg px-2 py-1.5 border transition-all ${
+          isSelected
+            ? "border-purple-400 ring-2 ring-purple-400/40 bg-purple-900/30"
+            : isCaptainPick
+              ? "border-yellow-500 ring-1 ring-yellow-500/30 bg-yellow-900/20"
+              : "border-slate-600 bg-slate-800/60"
         }`}>
-          <div className={`text-lg font-bold text-center ${riskColor}`}>
+          <div className={`text-lg font-bold text-center ${xPtsColor}`}>
             {xPts.toFixed(1)}
           </div>
           <div className="text-[9px] text-slate-500 text-center">xPts</div>
+          {/* Status icon */}
+          <span className={`absolute -top-1.5 -left-1.5 text-xs ${statusColor}`} title={statusTitle}>
+            {statusIcon}
+          </span>
+          {/* Captain badge */}
           {isCaptainPick && (
             <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-yellow-500 flex items-center justify-center text-[10px] font-bold text-black">
               C
@@ -1161,12 +1526,26 @@ function PlannerPitch({
         <div className="text-xs font-semibold text-white mt-1 text-center truncate w-full" title={pick.webName}>
           {pick.webName}
         </div>
-        {/* Team & risk */}
+        {/* Team & EO% */}
         <div className="flex gap-1 text-[9px] text-slate-500">
           <span>{team?.short_name ?? "?"}</span>
           <span>|</span>
-          <span className={riskColor}>{risk}</span>
+          <span title="Effective Ownership">{eo.toFixed(1)}%</span>
         </div>
+        {/* Captain toggle (double-click area) */}
+        {!isBench && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onCaptainClick(pick.element); }}
+            className={`mt-0.5 text-[8px] px-1.5 py-0.5 rounded transition-colors ${
+              isCaptainPick
+                ? "bg-yellow-500/20 text-yellow-400 font-semibold"
+                : "text-slate-600 hover:text-yellow-400 hover:bg-yellow-500/10"
+            }`}
+            title="Set as captain"
+          >
+            {isCaptainPick ? "CAPT" : "set C"}
+          </button>
+        )}
       </div>
     );
   };
@@ -1179,6 +1558,16 @@ function PlannerPitch({
 
   return (
     <div className="w-full">
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-3 px-6 py-2 text-[10px] text-slate-500 border-b border-slate-700/50">
+        <span><span className="text-emerald-400">{"\u2714"}</span> Nailed</span>
+        <span><span className="text-amber-400">{"\u26A0"}</span> Doubtful</span>
+        <span><span className="text-orange-400">{"\u21BB"}</span> Rotation</span>
+        <span><span className="text-red-400">{"\u2718"}</span> Unavailable</span>
+        <span><span className="text-purple-400">{"\u2606"}</span> Differential</span>
+        <span className="ml-auto text-slate-600">Tap player to swap</span>
+      </div>
+
       {/* Pitch */}
       <div
         className="relative overflow-hidden"
@@ -1201,7 +1590,6 @@ function PlannerPitch({
           <div className="absolute left-1/2 -translate-x-1/2 bottom-0 w-40 h-14 border-t border-l border-r border-white/15" />
         </div>
 
-        {/* Player positions */}
         <div className="relative z-10 flex flex-col justify-between py-4" style={{ minHeight: 380 }}>
           {fwd.length > 0 && renderRow(fwd)}
           {mid.length > 0 && renderRow(mid)}

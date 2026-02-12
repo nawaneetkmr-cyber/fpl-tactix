@@ -255,6 +255,26 @@ export async function GET(req: Request) {
       captainIdForSafety
     );
 
+    // Extract bank & free transfers for planner
+    const bankValue = (picksData.entry_history?.bank ?? 0) / 10;
+    let freeTransfersValue = 1;
+    if (latestHistory && latestHistory.length >= 2) {
+      const sortedH = [...latestHistory].sort(
+        (a: { event: number }, b: { event: number }) => b.event - a.event
+      );
+      const prevGwH = sortedH.find(
+        (h: { event: number }) => h.event === gw - 1
+      );
+      if (prevGwH && prevGwH.event_transfers === 0) {
+        freeTransfersValue = 2;
+      }
+    }
+
+    // Chips used
+    const chipsUsed: string[] = (latestHistory || [])
+      .filter((h: { active_chip: string | null }) => h.active_chip)
+      .map((h: { active_chip: string }) => h.active_chip);
+
     return Response.json({
       teamName: entry.name,
       playerName: `${entry.player_first_name} ${entry.player_last_name}`,
@@ -274,6 +294,9 @@ export async function GET(req: Request) {
       liveElements,
       elements,
       teams,
+      bank: bankValue,
+      freeTransfers: freeTransfersValue,
+      chipsUsed,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
