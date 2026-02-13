@@ -86,12 +86,13 @@ export async function GET(req: Request) {
     const averageScore = currentEvent?.average_entry_score ?? 0;
     const totalPlayers = bootstrap.total_players ?? 10000000;
 
-    const [live, picksData, entry, fixtures] = await Promise.all([
+    const [live, picksData, entry, fixturesResult] = await Promise.all([
       fetchLiveGW(gw),
       fetchUserPicks(teamId, gw),
       fetchEntry(teamId),
-      fetchFixtures(),
+      fetchFixtures().catch(() => [] as unknown[]),
     ]);
+    const fixtures = Array.isArray(fixturesResult) ? fixturesResult : [];
 
     const picks = picksData.picks;
     const liveElements = live.elements;
