@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 export async function GET() {
   try {
     const headers = {
-      'user-agent': 'FPL Tactix/1.0 (+https://example.local)'
+      'user-agent': 'FPL Tactix/1.0 (+https://fpl-tactix.app)'
     };
 
     // Fetch bootstrap and fixtures in parallel

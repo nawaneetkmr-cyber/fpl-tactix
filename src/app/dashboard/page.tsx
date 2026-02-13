@@ -219,34 +219,48 @@ function DashboardInner() {
     }
   }, [data, analyticsPosition, teamId, fetchAnalytics]);
 
-  const fetchData = useCallback(async (id: string) => {
+  const fetchData = useCallback(async (id: string, retries = 2) => {
     if (!id) return;
     setLoading(true);
     setFixturesLoading(true);
-    try {
-      // Fetch summary and bootstrap in PARALLEL to avoid loading waterfall
-      const [summaryRes, bootstrapRes] = await Promise.all([
-        fetch(`/api/fpl/summary?teamId=${id}`),
-        fetch("/api/fpl/bootstrap"),
-      ]);
-      const json = await summaryRes.json();
-      const bootstrap = await bootstrapRes.json();
 
-      if (json.error) {
-        setData({ error: json.error } as DashboardData);
-      } else {
-        setData(json);
-        setLastUpdate(new Date());
-      }
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        // Fetch summary and bootstrap in PARALLEL to avoid loading waterfall
+        const [summaryRes, bootstrapRes] = await Promise.all([
+          fetch(`/api/fpl/summary?teamId=${id}`),
+          fetch("/api/fpl/bootstrap"),
+        ]);
+        const json = await summaryRes.json();
+        const bootstrap = await bootstrapRes.json();
 
-      // Process bootstrap data immediately (no second waterfall)
-      if (bootstrap.ok) {
-        setBootstrapElements(bootstrap.elements || []);
-        setBootstrapTeams(bootstrap.teams || []);
-        bootstrapCacheRef.current = bootstrap;
+        if (json.error) {
+          // Retry on server-side 403/5xx errors
+          const is403or5xx = /failed: (403|5\d{2})/.test(json.error);
+          if (is403or5xx && attempt < retries) {
+            await new Promise((r) => setTimeout(r, 1500 * Math.pow(2, attempt)));
+            continue;
+          }
+          setData({ error: json.error } as DashboardData);
+        } else {
+          setData(json);
+          setLastUpdate(new Date());
+        }
+
+        // Process bootstrap data immediately (no second waterfall)
+        if (bootstrap.ok) {
+          setBootstrapElements(bootstrap.elements || []);
+          setBootstrapTeams(bootstrap.teams || []);
+          bootstrapCacheRef.current = bootstrap;
+        }
+        break; // success — exit retry loop
+      } catch (e) {
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 1500 * Math.pow(2, attempt)));
+          continue;
+        }
+        setData({ error: String(e) } as DashboardData);
       }
-    } catch (e) {
-      setData({ error: String(e) } as DashboardData);
     }
     setLoading(false);
   }, []);
