@@ -104,8 +104,8 @@ export async function GET(req: Request) {
     const benchPoints = getBenchPoints(picks, liveElements);
     const captainPoints = getCaptainPoints(picks, liveElements);
 
-    // Rank estimation
-    const estimatedLiveRank = estimateRank(livePoints, averageScore, totalPlayers);
+    // GW rank estimation (single-gameweek rank based on this GW's points)
+    const estimatedGwRank = estimateRank(livePoints, averageScore, totalPlayers);
 
     // Previous GW rank for rank change calculation
     const latestHistory = history?.current;
@@ -113,6 +113,24 @@ export async function GET(req: Request) {
       (h: { event: number }) => h.event === gw - 1
     );
     const prevOverallRank = prevGw?.overall_rank ?? null;
+
+    // Actual ranks from FPL API (available once a GW is finalized)
+    const currentGwHistory = latestHistory?.find(
+      (h: { event: number }) => h.event === gw
+    );
+    const isGwFinishedEarly = currentEvent?.finished ?? false;
+
+    // Overall rank (cumulative season rank):
+    // - When GW is finished: use actual rank from history or entry
+    // - When GW is live: use entry.summary_overall_rank (last known official rank)
+    //   NOTE: estimateRank() estimates a single-GW rank, NOT the overall rank.
+    //   Using it as overall rank is wrong (e.g. 44 GW pts → ~7M, but actual overall is ~454K).
+    const overallRank = isGwFinishedEarly
+      ? (currentGwHistory?.overall_rank ?? entry?.summary_overall_rank ?? prevOverallRank ?? 0)
+      : (entry?.summary_overall_rank ?? prevOverallRank ?? 0);
+
+    // GW rank (event rank) — actual from history when finished, estimated when live
+    const gwRank = currentGwHistory?.rank ?? estimatedGwRank;
 
     // Enriched picks for UI
     const enrichedPicks = enrichPicks(picks, liveElements, elements);
@@ -284,7 +302,7 @@ export async function GET(req: Request) {
     //  Safety Score — EO-weighted live points threshold
     // ──────────────────────────────────────────────────
 
-    const actualRank = entry?.summary_overall_rank || estimatedLiveRank;
+    const actualRank = overallRank;
     const captainIdForSafety = findMostCaptainedPlayer(elements);
     const safetyResult = computeSafetyResult(
       livePoints,
@@ -339,7 +357,9 @@ export async function GET(req: Request) {
       benchPoints,
       captainPoints,
       bestCaptain,
-      estimatedLiveRank,
+      estimatedGwRank,
+      overallRank,
+      gwRank,
       averageScore,
       totalPlayers,
       prevOverallRank,

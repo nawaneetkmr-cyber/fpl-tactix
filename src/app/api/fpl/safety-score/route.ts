@@ -110,7 +110,6 @@ export async function GET(req: Request) {
     const actualRank = entry?.summary_overall_rank || estimatedRank;
     const rank = tierOverride ? rankFromTier(tierOverride) : actualRank;
 
-    // Find most-captained player
     const captainId = findMostCaptainedPlayer(elements);
 
     // Compute safety score

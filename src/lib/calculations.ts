@@ -329,7 +329,8 @@ const TIER_CONCENTRATION: Record<RankTier, number> = {
  * @param liveElements  - All players' live GW stats (from /event/{gw}/live/)
  * @param elements      - Bootstrap elements with ownership data (selected_by_percent)
  * @param rank          - The manager's estimated or actual rank
- * @param captainId     - The most-captained player ID (if known) for EO captain boost
+ * @param captainId     - The most-captained player ID (if known) for EO captain boost (legacy)
+ * @param captainCandidates - Multiple captain candidates with weights (preferred over captainId)
  */
 export function calculateSafetyScore(
   liveElements: PlayerElement[],
@@ -405,7 +406,7 @@ export function computeSafetyResult(
 
 /**
  * Find the most-captained player from bootstrap data.
- * Uses a heuristic: highest (ownership% * form * points_per_game) among premium players.
+ * Uses a heuristic: highest (ownership% * form) among premium players (cost >= 7.0).
  */
 export function findMostCaptainedPlayer(
   elements: { id: number; selected_by_percent?: string; now_cost?: number; form?: string; element_type?: number }[]
@@ -418,10 +419,9 @@ export function findMostCaptainedPlayer(
     const form = parseFloat(el.form || "0");
     const cost = (el.now_cost || 0) / 10;
 
-    // Only consider premium players (cost > 8.0) as captain candidates
-    if (cost < 8.0) continue;
+    // Consider mid-to-premium players as captain candidates
+    if (cost < 7.0) continue;
 
-    // Captain score: ownership * form (popular + in-form = likely captained)
     const score = ownership * form;
     if (score > bestScore) {
       bestScore = score;
@@ -430,6 +430,35 @@ export function findMostCaptainedPlayer(
   }
 
   return bestId;
+}
+
+/**
+ * Find top captain candidates with estimated captaincy weights.
+ * Returns up to 3 candidates with weights summing to ~1.0.
+ * This better models the reality that captaincy is spread across a few players.
+ */
+export function findCaptainCandidates(
+  elements: { id: number; selected_by_percent?: string; now_cost?: number; form?: string; element_type?: number }[]
+): { id: number; weight: number }[] {
+  const candidates: { id: number; score: number }[] = [];
+
+  for (const el of elements) {
+    const ownership = parseFloat(el.selected_by_percent || "0");
+    const form = parseFloat(el.form || "0");
+    const cost = (el.now_cost || 0) / 10;
+    if (cost < 7.0 || form <= 0) continue;
+
+    candidates.push({ id: el.id, score: ownership * form });
+  }
+
+  // Sort by score descending and take top 3
+  candidates.sort((a, b) => b.score - a.score);
+  const top = candidates.slice(0, 3);
+  if (top.length === 0) return [];
+
+  // Convert scores to weights (proportional)
+  const totalScore = top.reduce((sum, c) => sum + c.score, 0);
+  return top.map((c) => ({ id: c.id, weight: c.score / totalScore }));
 }
 
 // ---------- Enriched pick data for UI ----------

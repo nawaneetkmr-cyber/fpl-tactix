@@ -81,7 +81,9 @@ interface DashboardData {
   benchPoints: number;
   captainPoints: number;
   bestCaptain: { id: number | null; points: number };
-  estimatedLiveRank: number;
+  estimatedGwRank: number;
+  overallRank: number;
+  gwRank: number | null;
   averageScore: number;
   totalPlayers: number;
   prevOverallRank: number | null;
@@ -876,8 +878,9 @@ function DashboardInner() {
   if (!data) return null;
 
   // Calculate stats
+  const displayRank = data.overallRank || data.estimatedGwRank;
   const rankChange = data.prevOverallRank
-    ? data.prevOverallRank - data.estimatedLiveRank
+    ? data.prevOverallRank - displayRank
     : null;
   const rankChangePercentRaw =
     data.prevOverallRank && rankChange
@@ -916,8 +919,12 @@ function DashboardInner() {
               <div className="text-xl font-bold text-emerald-400">{data.livePoints}</div>
             </div>
             <div className="text-center">
-              <div className="text-slate-400">Rank</div>
-              <div className="text-xl font-bold text-slate-50">{formatRank(data.estimatedLiveRank)}</div>
+              <div className="text-slate-400">Overall Rank</div>
+              <div className="text-xl font-bold text-slate-50">{formatRank(displayRank)}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-slate-400">GW Rank</div>
+              <div className="text-xl font-bold text-slate-50">{formatRank(data.gwRank ?? 0)}</div>
             </div>
             {rankChange !== null && (
               <div className="text-center">
@@ -989,12 +996,16 @@ function DashboardInner() {
           />
           <StatCard
             label="Overall Rank"
-            value={formatRank(data.estimatedLiveRank)}
+            value={formatRank(displayRank)}
             sublabel={
               rankChangePercentStr
                 ? `${rankChange! > 0 ? "+" : ""}${rankChangePercentStr}%`
                 : undefined
             }
+          />
+          <StatCard
+            label="GW Rank"
+            value={formatRank(data.gwRank ?? 0)}
           />
           {/* Safety Score: EO-weighted points threshold for rank bracket */}
           <div className={`p-4 rounded-xl bg-gradient-to-br border ${
