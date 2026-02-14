@@ -919,8 +919,12 @@ function DashboardInner() {
               <div className="text-xl font-bold text-emerald-400">{data.livePoints}</div>
             </div>
             <div className="text-center">
-              <div className="text-slate-400">Rank</div>
+              <div className="text-slate-400">Overall Rank</div>
               <div className="text-xl font-bold text-slate-50">{formatRank(displayRank)}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-slate-400">GW Rank</div>
+              <div className="text-xl font-bold text-slate-50">{formatRank(data.gwRank ?? 0)}</div>
             </div>
             {rankChange !== null && (
               <div className="text-center">
@@ -998,6 +1002,10 @@ function DashboardInner() {
                 ? `${rankChange! > 0 ? "+" : ""}${rankChangePercentStr}%`
                 : undefined
             }
+          />
+          <StatCard
+            label="GW Rank"
+            value={formatRank(data.gwRank ?? 0)}
           />
           {/* Safety Score: EO-weighted points threshold for rank bracket */}
           <div className={`p-4 rounded-xl bg-gradient-to-br border ${
