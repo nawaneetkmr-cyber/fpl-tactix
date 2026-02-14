@@ -104,7 +104,7 @@ export async function GET(req: Request) {
     const benchPoints = getBenchPoints(picks, liveElements);
     const captainPoints = getCaptainPoints(picks, liveElements);
 
-    // Rank estimation
+    // Rank estimation (used as fallback when actual rank is unavailable)
     const estimatedLiveRank = estimateRank(livePoints, averageScore, totalPlayers);
 
     // Previous GW rank for rank change calculation
@@ -113,6 +113,23 @@ export async function GET(req: Request) {
       (h: { event: number }) => h.event === gw - 1
     );
     const prevOverallRank = prevGw?.overall_rank ?? null;
+
+    // Actual ranks from FPL API (available once a GW is finalized)
+    const currentGwHistory = latestHistory?.find(
+      (h: { event: number }) => h.event === gw
+    );
+    const isGwFinishedEarly = currentEvent?.finished ?? false;
+
+    // Use actual overall rank when the GW is finished:
+    // 1. From history for the specific GW, or
+    // 2. From entry.summary_overall_rank (latest overall rank)
+    // Fall back to estimated rank when GW is still live
+    const overallRank = isGwFinishedEarly
+      ? (currentGwHistory?.overall_rank ?? entry?.summary_overall_rank ?? estimatedLiveRank)
+      : estimatedLiveRank;
+
+    // GW rank (event rank) — only available from history after GW finishes
+    const gwRank = currentGwHistory?.rank ?? null;
 
     // Enriched picks for UI
     const enrichedPicks = enrichPicks(picks, liveElements, elements);
@@ -284,7 +301,7 @@ export async function GET(req: Request) {
     //  Safety Score — EO-weighted live points threshold
     // ──────────────────────────────────────────────────
 
-    const actualRank = entry?.summary_overall_rank || estimatedLiveRank;
+    const actualRank = overallRank;
     const captainIdForSafety = findMostCaptainedPlayer(elements);
     const safetyResult = computeSafetyResult(
       livePoints,
@@ -340,6 +357,8 @@ export async function GET(req: Request) {
       captainPoints,
       bestCaptain,
       estimatedLiveRank,
+      overallRank,
+      gwRank,
       averageScore,
       totalPlayers,
       prevOverallRank,

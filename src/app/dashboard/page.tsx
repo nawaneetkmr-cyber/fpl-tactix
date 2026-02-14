@@ -82,6 +82,8 @@ interface DashboardData {
   captainPoints: number;
   bestCaptain: { id: number | null; points: number };
   estimatedLiveRank: number;
+  overallRank: number;
+  gwRank: number | null;
   averageScore: number;
   totalPlayers: number;
   prevOverallRank: number | null;
@@ -876,8 +878,9 @@ function DashboardInner() {
   if (!data) return null;
 
   // Calculate stats
+  const displayRank = data.overallRank ?? data.estimatedLiveRank;
   const rankChange = data.prevOverallRank
-    ? data.prevOverallRank - data.estimatedLiveRank
+    ? data.prevOverallRank - displayRank
     : null;
   const rankChangePercentRaw =
     data.prevOverallRank && rankChange
@@ -917,7 +920,7 @@ function DashboardInner() {
             </div>
             <div className="text-center">
               <div className="text-slate-400">Rank</div>
-              <div className="text-xl font-bold text-slate-50">{formatRank(data.estimatedLiveRank)}</div>
+              <div className="text-xl font-bold text-slate-50">{formatRank(displayRank)}</div>
             </div>
             {rankChange !== null && (
               <div className="text-center">
@@ -989,7 +992,7 @@ function DashboardInner() {
           />
           <StatCard
             label="Overall Rank"
-            value={formatRank(data.estimatedLiveRank)}
+            value={formatRank(displayRank)}
             sublabel={
               rankChangePercentStr
                 ? `${rankChange! > 0 ? "+" : ""}${rankChangePercentStr}%`
