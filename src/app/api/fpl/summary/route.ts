@@ -104,8 +104,8 @@ export async function GET(req: Request) {
     const benchPoints = getBenchPoints(picks, liveElements);
     const captainPoints = getCaptainPoints(picks, liveElements);
 
-    // Rank estimation (used as fallback when actual rank is unavailable)
-    const estimatedLiveRank = estimateRank(livePoints, averageScore, totalPlayers);
+    // GW rank estimation (single-gameweek rank based on this GW's points)
+    const estimatedGwRank = estimateRank(livePoints, averageScore, totalPlayers);
 
     // Previous GW rank for rank change calculation
     const latestHistory = history?.current;
@@ -120,16 +120,17 @@ export async function GET(req: Request) {
     );
     const isGwFinishedEarly = currentEvent?.finished ?? false;
 
-    // Use actual overall rank when the GW is finished:
-    // 1. From history for the specific GW, or
-    // 2. From entry.summary_overall_rank (latest overall rank)
-    // Fall back to estimated rank when GW is still live
+    // Overall rank (cumulative season rank):
+    // - When GW is finished: use actual rank from history or entry
+    // - When GW is live: use entry.summary_overall_rank (last known official rank)
+    //   NOTE: estimateRank() estimates a single-GW rank, NOT the overall rank.
+    //   Using it as overall rank is wrong (e.g. 44 GW pts → ~7M, but actual overall is ~454K).
     const overallRank = isGwFinishedEarly
-      ? (currentGwHistory?.overall_rank ?? entry?.summary_overall_rank ?? estimatedLiveRank)
-      : estimatedLiveRank;
+      ? (currentGwHistory?.overall_rank ?? entry?.summary_overall_rank ?? prevOverallRank ?? 0)
+      : (entry?.summary_overall_rank ?? prevOverallRank ?? 0);
 
-    // GW rank (event rank) — only available from history after GW finishes
-    const gwRank = currentGwHistory?.rank ?? null;
+    // GW rank (event rank) — actual from history when finished, estimated when live
+    const gwRank = currentGwHistory?.rank ?? estimatedGwRank;
 
     // Enriched picks for UI
     const enrichedPicks = enrichPicks(picks, liveElements, elements);
@@ -356,7 +357,7 @@ export async function GET(req: Request) {
       benchPoints,
       captainPoints,
       bestCaptain,
-      estimatedLiveRank,
+      estimatedGwRank,
       overallRank,
       gwRank,
       averageScore,

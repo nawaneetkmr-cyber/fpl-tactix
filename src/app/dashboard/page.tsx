@@ -81,7 +81,7 @@ interface DashboardData {
   benchPoints: number;
   captainPoints: number;
   bestCaptain: { id: number | null; points: number };
-  estimatedLiveRank: number;
+  estimatedGwRank: number;
   overallRank: number;
   gwRank: number | null;
   averageScore: number;
@@ -878,7 +878,7 @@ function DashboardInner() {
   if (!data) return null;
 
   // Calculate stats
-  const displayRank = data.overallRank ?? data.estimatedLiveRank;
+  const displayRank = data.overallRank || data.estimatedGwRank;
   const rankChange = data.prevOverallRank
     ? data.prevOverallRank - displayRank
     : null;
