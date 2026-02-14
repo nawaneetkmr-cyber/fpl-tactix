@@ -309,11 +309,11 @@ const TIER_LABELS: Record<RankTier, string> = {
  * - overall: raw ownership is used as-is
  */
 const TIER_CONCENTRATION: Record<RankTier, number> = {
-  top10k: 1.8,
-  top50k: 1.55,
-  top100k: 1.35,
-  top500k: 1.18,
-  top1m: 1.08,
+  top10k: 1.35,
+  top50k: 1.25,
+  top100k: 1.15,
+  top500k: 1.08,
+  top1m: 1.04,
   overall: 1.0,
 };
 
@@ -336,8 +336,7 @@ export function calculateSafetyScore(
   liveElements: PlayerElement[],
   elements: { id: number; selected_by_percent?: string; element_type?: number }[],
   rank: number,
-  captainId?: number,
-  captainCandidates?: { id: number; weight: number }[]
+  captainId?: number
 ): SafetyScoreResult {
   const tier = getRankTier(rank);
   const concentration = TIER_CONCENTRATION[tier];
@@ -347,17 +346,6 @@ export function calculateSafetyScore(
   for (const el of elements) {
     const pct = parseFloat(el.selected_by_percent || "0");
     ownershipMap.set(el.id, pct);
-  }
-
-  // Build captain weight lookup
-  const captainWeightMap = new Map<number, number>();
-  if (captainCandidates && captainCandidates.length > 0) {
-    for (const c of captainCandidates) {
-      captainWeightMap.set(c.id, c.weight);
-    }
-  } else if (captainId) {
-    // Legacy single-captain fallback
-    captainWeightMap.set(captainId, 1.0);
   }
 
   let totalEoPoints = 0;
@@ -372,16 +360,18 @@ export function calculateSafetyScore(
     // This makes high-ownership players even more dominant at top ranks
     const adjustedOwnership = Math.pow(ownershipFraction, 1 / concentration);
 
-    // Base contribution: points * adjusted EO
-    totalEoPoints += player.stats.total_points * adjustedOwnership;
+    let points = player.stats.total_points;
 
-    // Captain boost: captained players contribute EXTRA points (the captain doubles points).
-    // We model this as: extraPoints = playerPoints * captainWeight * adjustedOwnership
-    // where captainWeight represents the fraction of managers who captain this player.
-    const captainWeight = captainWeightMap.get(player.id);
-    if (captainWeight && captainWeight > 0) {
-      totalEoPoints += player.stats.total_points * captainWeight * adjustedOwnership;
+    // Captain boost: the most-captained player gets ~2x effective ownership
+    // since many managers captain them (approximate 60-80% captain rate for top pick)
+    if (captainId && player.id === captainId) {
+      // Model: top-captained player contributes extra points from captaincy
+      // At top ranks, captain convergence is higher
+      const captainMultiplier = tier === "top10k" ? 0.7 : tier === "top50k" ? 0.6 : 0.5;
+      points += player.stats.total_points * captainMultiplier * adjustedOwnership;
     }
+
+    totalEoPoints += points * adjustedOwnership;
   }
 
   const safetyScore = Math.round(totalEoPoints);
@@ -403,10 +393,9 @@ export function computeSafetyResult(
   liveElements: PlayerElement[],
   elements: { id: number; selected_by_percent?: string; element_type?: number }[],
   rank: number,
-  captainId?: number,
-  captainCandidates?: { id: number; weight: number }[]
+  captainId?: number
 ): SafetyScoreResult {
-  const result = calculateSafetyScore(liveElements, elements, rank, captainId, captainCandidates);
+  const result = calculateSafetyScore(liveElements, elements, rank, captainId);
   const delta = livePoints - result.safetyScore;
   return {
     ...result,

@@ -10,7 +10,6 @@ import {
   estimateRank,
   computeSafetyResult,
   findMostCaptainedPlayer,
-  findCaptainCandidates,
   getRankTier,
 } from "@/lib/calculations";
 import type { Pick, PlayerElement, SafetyScoreResult } from "@/lib/calculations";
@@ -111,8 +110,6 @@ export async function GET(req: Request) {
     const actualRank = entry?.summary_overall_rank || estimatedRank;
     const rank = tierOverride ? rankFromTier(tierOverride) : actualRank;
 
-    // Find captain candidates with weights
-    const captainCandidates = findCaptainCandidates(elements);
     const captainId = findMostCaptainedPlayer(elements);
 
     // Compute safety score
@@ -121,8 +118,7 @@ export async function GET(req: Request) {
       liveElements,
       elements,
       rank,
-      captainId,
-      captainCandidates
+      captainId
     );
 
     // Build top contributors breakdown
