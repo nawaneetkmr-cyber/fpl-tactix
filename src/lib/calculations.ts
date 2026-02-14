@@ -309,11 +309,11 @@ const TIER_LABELS: Record<RankTier, string> = {
  * - overall: raw ownership is used as-is
  */
 const TIER_CONCENTRATION: Record<RankTier, number> = {
-  top10k: 1.35,
-  top50k: 1.25,
-  top100k: 1.15,
-  top500k: 1.08,
-  top1m: 1.04,
+  top10k: 1.8,
+  top50k: 1.55,
+  top100k: 1.35,
+  top500k: 1.18,
+  top1m: 1.08,
   overall: 1.0,
 };
 
@@ -329,13 +329,15 @@ const TIER_CONCENTRATION: Record<RankTier, number> = {
  * @param liveElements  - All players' live GW stats (from /event/{gw}/live/)
  * @param elements      - Bootstrap elements with ownership data (selected_by_percent)
  * @param rank          - The manager's estimated or actual rank
- * @param captainId     - The most-captained player ID (if known) for EO captain boost
+ * @param captainId     - The most-captained player ID (if known) for EO captain boost (legacy)
+ * @param captainCandidates - Multiple captain candidates with weights (preferred over captainId)
  */
 export function calculateSafetyScore(
   liveElements: PlayerElement[],
   elements: { id: number; selected_by_percent?: string; element_type?: number }[],
   rank: number,
-  captainId?: number
+  captainId?: number,
+  captainCandidates?: { id: number; weight: number }[]
 ): SafetyScoreResult {
   const tier = getRankTier(rank);
   const concentration = TIER_CONCENTRATION[tier];
@@ -345,6 +347,17 @@ export function calculateSafetyScore(
   for (const el of elements) {
     const pct = parseFloat(el.selected_by_percent || "0");
     ownershipMap.set(el.id, pct);
+  }
+
+  // Build captain weight lookup
+  const captainWeightMap = new Map<number, number>();
+  if (captainCandidates && captainCandidates.length > 0) {
+    for (const c of captainCandidates) {
+      captainWeightMap.set(c.id, c.weight);
+    }
+  } else if (captainId) {
+    // Legacy single-captain fallback
+    captainWeightMap.set(captainId, 1.0);
   }
 
   let totalEoPoints = 0;
@@ -359,18 +372,16 @@ export function calculateSafetyScore(
     // This makes high-ownership players even more dominant at top ranks
     const adjustedOwnership = Math.pow(ownershipFraction, 1 / concentration);
 
-    let points = player.stats.total_points;
+    // Base contribution: points * adjusted EO
+    totalEoPoints += player.stats.total_points * adjustedOwnership;
 
-    // Captain boost: the most-captained player gets ~2x effective ownership
-    // since many managers captain them (approximate 60-80% captain rate for top pick)
-    if (captainId && player.id === captainId) {
-      // Model: top-captained player contributes extra points from captaincy
-      // At top ranks, captain convergence is higher
-      const captainMultiplier = tier === "top10k" ? 0.7 : tier === "top50k" ? 0.6 : 0.5;
-      points += player.stats.total_points * captainMultiplier * adjustedOwnership;
+    // Captain boost: captained players contribute EXTRA points (the captain doubles points).
+    // We model this as: extraPoints = playerPoints * captainWeight * adjustedOwnership
+    // where captainWeight represents the fraction of managers who captain this player.
+    const captainWeight = captainWeightMap.get(player.id);
+    if (captainWeight && captainWeight > 0) {
+      totalEoPoints += player.stats.total_points * captainWeight * adjustedOwnership;
     }
-
-    totalEoPoints += points * adjustedOwnership;
   }
 
   const safetyScore = Math.round(totalEoPoints);
@@ -392,9 +403,10 @@ export function computeSafetyResult(
   liveElements: PlayerElement[],
   elements: { id: number; selected_by_percent?: string; element_type?: number }[],
   rank: number,
-  captainId?: number
+  captainId?: number,
+  captainCandidates?: { id: number; weight: number }[]
 ): SafetyScoreResult {
-  const result = calculateSafetyScore(liveElements, elements, rank, captainId);
+  const result = calculateSafetyScore(liveElements, elements, rank, captainId, captainCandidates);
   const delta = livePoints - result.safetyScore;
   return {
     ...result,
@@ -405,7 +417,7 @@ export function computeSafetyResult(
 
 /**
  * Find the most-captained player from bootstrap data.
- * Uses a heuristic: highest (ownership% * form * points_per_game) among premium players.
+ * Uses a heuristic: highest (ownership% * form) among premium players (cost >= 7.0).
  */
 export function findMostCaptainedPlayer(
   elements: { id: number; selected_by_percent?: string; now_cost?: number; form?: string; element_type?: number }[]
@@ -418,10 +430,9 @@ export function findMostCaptainedPlayer(
     const form = parseFloat(el.form || "0");
     const cost = (el.now_cost || 0) / 10;
 
-    // Only consider premium players (cost > 8.0) as captain candidates
-    if (cost < 8.0) continue;
+    // Consider mid-to-premium players as captain candidates
+    if (cost < 7.0) continue;
 
-    // Captain score: ownership * form (popular + in-form = likely captained)
     const score = ownership * form;
     if (score > bestScore) {
       bestScore = score;
@@ -430,6 +441,35 @@ export function findMostCaptainedPlayer(
   }
 
   return bestId;
+}
+
+/**
+ * Find top captain candidates with estimated captaincy weights.
+ * Returns up to 3 candidates with weights summing to ~1.0.
+ * This better models the reality that captaincy is spread across a few players.
+ */
+export function findCaptainCandidates(
+  elements: { id: number; selected_by_percent?: string; now_cost?: number; form?: string; element_type?: number }[]
+): { id: number; weight: number }[] {
+  const candidates: { id: number; score: number }[] = [];
+
+  for (const el of elements) {
+    const ownership = parseFloat(el.selected_by_percent || "0");
+    const form = parseFloat(el.form || "0");
+    const cost = (el.now_cost || 0) / 10;
+    if (cost < 7.0 || form <= 0) continue;
+
+    candidates.push({ id: el.id, score: ownership * form });
+  }
+
+  // Sort by score descending and take top 3
+  candidates.sort((a, b) => b.score - a.score);
+  const top = candidates.slice(0, 3);
+  if (top.length === 0) return [];
+
+  // Convert scores to weights (proportional)
+  const totalScore = top.reduce((sum, c) => sum + c.score, 0);
+  return top.map((c) => ({ id: c.id, weight: c.score / totalScore }));
 }
 
 // ---------- Enriched pick data for UI ----------

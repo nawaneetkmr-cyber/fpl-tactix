@@ -15,6 +15,7 @@ import {
   enrichPicks,
   computeSafetyResult,
   findMostCaptainedPlayer,
+  findCaptainCandidates,
 } from "@/lib/calculations";
 import { calculatePlayerProjections } from "@/lib/xpts";
 import type { FullElement, TeamStrength, FixtureDetail } from "@/lib/xpts";
@@ -303,13 +304,15 @@ export async function GET(req: Request) {
     // ──────────────────────────────────────────────────
 
     const actualRank = overallRank;
+    const captainCandidates = findCaptainCandidates(elements);
     const captainIdForSafety = findMostCaptainedPlayer(elements);
     const safetyResult = computeSafetyResult(
       livePoints,
       liveElements,
       elements,
       actualRank,
-      captainIdForSafety
+      captainIdForSafety,
+      captainCandidates
     );
 
     // Determine GW state for the UI
