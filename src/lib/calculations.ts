@@ -87,8 +87,9 @@ export function estimateRank(
   if (totalPlayers === 0) return 0;
 
   // Use a normal distribution approximation
-  // FPL scores roughly follow normal distribution with std dev ~ 12-15 points
-  const stdDev = 13;
+  // FPL scores roughly follow normal distribution with std dev ~ 14-16 points.
+  // Using 15 aligns better with observed GW rank data (e.g. LiveFPL).
+  const stdDev = 15;
   const zScore = (livePoints - averageScore) / stdDev;
 
   // Approximate percentile from z-score (simplified)
@@ -360,27 +361,44 @@ export function calculateSafetyScore(
     captainWeightMap.set(captainId, 1.0);
   }
 
-  let totalEoPoints = 0;
+  // First pass: compute adjusted EO values
+  const STARTING_XI = 11;
+  const adjustedEoMap = new Map<number, number>();
+  let totalAdjustedEo = 0;
 
   for (const player of liveElements) {
     const rawOwnership = ownershipMap.get(player.id) ?? 0;
     if (rawOwnership <= 0) continue;
 
     const ownershipFraction = rawOwnership / 100;
-
     // Apply tier concentration: raise ownership to power 1/concentration
-    // This makes high-ownership players even more dominant at top ranks
     const adjustedOwnership = Math.pow(ownershipFraction, 1 / concentration);
+    adjustedEoMap.set(player.id, adjustedOwnership);
+    totalAdjustedEo += adjustedOwnership;
+  }
 
-    // Base contribution: points * adjusted EO
-    totalEoPoints += player.stats.total_points * adjustedOwnership;
+  // Normalize so that total adjusted EO = STARTING_XI (11 players per squad).
+  // Without this, concentration inflates every player's EO and the sum
+  // balloons past 11, producing an unrealistically high safety score.
+  const normFactor = totalAdjustedEo > 0 ? STARTING_XI / totalAdjustedEo : 1;
 
-    // Captain boost: captained players contribute EXTRA points (the captain doubles points).
-    // We model this as: extraPoints = playerPoints * captainWeight * adjustedOwnership
-    // where captainWeight represents the fraction of managers who captain this player.
+  // Second pass: compute safety score with normalized EO
+  let totalEoPoints = 0;
+
+  for (const player of liveElements) {
+    const adjustedOwnership = adjustedEoMap.get(player.id);
+    if (!adjustedOwnership) continue;
+
+    const normalizedEo = adjustedOwnership * normFactor;
+
+    // Base contribution: points * normalized EO
+    totalEoPoints += player.stats.total_points * normalizedEo;
+
+    // Captain boost: captained players contribute EXTRA points (captain doubles points).
+    // Extra = playerPoints * captainWeight * normalizedEo
     const captainWeight = captainWeightMap.get(player.id);
     if (captainWeight && captainWeight > 0) {
-      totalEoPoints += player.stats.total_points * captainWeight * adjustedOwnership;
+      totalEoPoints += player.stats.total_points * captainWeight * normalizedEo;
     }
   }
 
