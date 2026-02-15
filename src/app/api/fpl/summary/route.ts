@@ -5,6 +5,7 @@ import {
   fetchEntry,
   fetchEntryHistory,
   fetchFixtures,
+  fetchOverallStandings,
 } from "@/lib/fpl";
 import {
   calculateLivePoints,
@@ -15,6 +16,7 @@ import {
   enrichPicks,
   computeSafetyResult,
   findMostCaptainedPlayer,
+  getRankTier,
 } from "@/lib/calculations";
 import { calculatePlayerProjections } from "@/lib/xpts";
 import type { FullElement, TeamStrength, FixtureDetail } from "@/lib/xpts";
@@ -281,18 +283,29 @@ export async function GET(req: Request) {
     }
 
     // ──────────────────────────────────────────────────
-    //  Safety Score — EO-weighted live points threshold
+    //  Safety Score — Live EO sampling with heuristic fallback
     // ──────────────────────────────────────────────────
 
     const actualRank = entry?.summary_overall_rank || estimatedLiveRank;
-    const captainIdForSafety = findMostCaptainedPlayer(elements);
-    const safetyResult = computeSafetyResult(
-      livePoints,
-      liveElements,
-      elements,
-      actualRank,
-      captainIdForSafety
-    );
+    const tier = getRankTier(actualRank);
+
+    let safetyResult;
+    try {
+      const liveEO = await sampleLiveEOForSummary(gw, tier, liveElements, elements);
+      const delta = livePoints - liveEO.safetyScore;
+      safetyResult = {
+        safetyScore: liveEO.safetyScore,
+        rankTier: tier,
+        tierLabel: { top10k: "Top 10K", top50k: "Top 50K", top100k: "Top 100K", top500k: "Top 500K", top1m: "Top 1M", overall: "Overall" }[tier] ?? "Overall",
+        delta,
+        arrow: (delta > 0 ? "green" : delta < 0 ? "red" : "neutral") as "green" | "red" | "neutral",
+      };
+    } catch {
+      const captainIdForSafety = findMostCaptainedPlayer(elements);
+      safetyResult = computeSafetyResult(
+        livePoints, liveElements, elements, actualRank, captainIdForSafety
+      );
+    }
 
     // Determine GW state for the UI
     const gwEventFinal = bootstrap.events?.find(
@@ -359,4 +372,91 @@ export async function GET(req: Request) {
     const message = err instanceof Error ? err.message : String(err);
     return Response.json({ error: message }, { status: 500 });
   }
+}
+
+// ---------- Live EO Sampling for Summary ----------
+
+const summaryEOCache = new Map<string, { safetyScore: number; ts: number }>();
+const SUMMARY_EO_TTL = 10 * 60 * 1000;
+
+const SUMMARY_TIER_PAGES: Record<string, number[]> = {
+  top10k:  [1, 2, 3, 4],
+  top50k:  [50, 51, 52, 53],
+  top100k: [100, 101, 102, 103],
+  top500k: [500, 501, 502, 503],
+  top1m:   [1000, 1001, 1002, 1003],
+  overall: [2000, 2001, 2002, 2003],
+};
+
+async function sampleLiveEOForSummary(
+  gw: number,
+  tier: string,
+  liveElements: { id: number; stats: { total_points: number } }[],
+  _bootstrapElements: { id: number }[]
+): Promise<{ safetyScore: number }> {
+  const cacheKey = `summary-${gw}-${tier}`;
+  const cached = summaryEOCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SUMMARY_EO_TTL) {
+    return { safetyScore: cached.safetyScore };
+  }
+
+  const pages = SUMMARY_TIER_PAGES[tier] ?? SUMMARY_TIER_PAGES.top10k;
+
+  const standingsResults = await Promise.all(
+    pages.map((page) => fetchOverallStandings(page))
+  );
+
+  const managerIds: number[] = [];
+  for (const result of standingsResults) {
+    const entries = result?.standings?.results ?? [];
+    for (const entry of entries) {
+      managerIds.push(entry.entry);
+    }
+  }
+
+  if (managerIds.length === 0) throw new Error("No managers");
+
+  const BATCH_SIZE = 25;
+  const allPicks: { picks: { element: number; is_captain: boolean; position: number }[] }[] = [];
+
+  for (let i = 0; i < managerIds.length; i += BATCH_SIZE) {
+    const batch = managerIds.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((id) => fetchUserPicks(id, gw))
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled") allPicks.push(r.value);
+    }
+  }
+
+  const sampleSize = allPicks.length;
+  if (sampleSize === 0) throw new Error("No picks fetched");
+
+  const ownershipCount = new Map<number, number>();
+  const captaincyCount = new Map<number, number>();
+
+  for (const picksData of allPicks) {
+    for (const pick of picksData.picks) {
+      if (pick.position <= 11) {
+        ownershipCount.set(pick.element, (ownershipCount.get(pick.element) ?? 0) + 1);
+      }
+      if (pick.is_captain) {
+        captaincyCount.set(pick.element, (captaincyCount.get(pick.element) ?? 0) + 1);
+      }
+    }
+  }
+
+  let safetyScore = 0;
+  for (const player of liveElements) {
+    const owned = ownershipCount.get(player.id) ?? 0;
+    const captained = captaincyCount.get(player.id) ?? 0;
+    if (owned === 0 && captained === 0) continue;
+
+    const eo = ((owned + captained) / sampleSize) * 100;
+    safetyScore += player.stats.total_points * (eo / 100);
+  }
+
+  safetyScore = Math.round(safetyScore);
+  summaryEOCache.set(cacheKey, { safetyScore, ts: Date.now() });
+  return { safetyScore };
 }

@@ -124,3 +124,16 @@ export async function fetchEventStatus() {
   );
   return res.json();
 }
+
+/**
+ * Fetch overall league standings (league 314) to get top-ranked manager IDs.
+ * Each page returns 50 managers sorted by overall rank.
+ */
+export async function fetchOverallStandings(page: number = 1) {
+  const res = await fetchWithRetry(
+    `${BASE}/leagues-classic/314/standings/?page_standings=${page}`,
+    { next: { revalidate: 600 } },
+    `overall standings p${page}`
+  );
+  return res.json();
+}

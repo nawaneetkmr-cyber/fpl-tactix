@@ -180,6 +180,7 @@ function DashboardInner() {
   const [plannerSelectedSlot, setPlannerSelectedSlot] = useState<number | null>(null);
   const [plannerSwapMode, setPlannerSwapMode] = useState<"transfer" | "benchswap" | null>(null);
   const [plannerCaptainId, setPlannerCaptainId] = useState<number | null>(null);
+  const [plannerViceCaptainId, setPlannerViceCaptainId] = useState<number | null>(null);
   const [plannerChip, setPlannerChip] = useState<string | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [simulationResult, setSimulationResult] = useState<{
@@ -1445,6 +1446,7 @@ function DashboardInner() {
                 elements={bootstrapElements}
                 teams={bootstrapTeams}
                 captainId={plannerCaptainId ?? captainSuggestions[0]?.element ?? null}
+                viceCaptainId={plannerViceCaptainId}
                 selectedSlot={plannerSelectedSlot}
                 onPlayerClick={(elementId) => {
                   if (plannerSelectedSlot === elementId) {
@@ -1477,6 +1479,15 @@ function DashboardInner() {
                 }}
                 onCaptainClick={(elementId) => {
                   setPlannerCaptainId(elementId);
+                  // If this player was VC, clear VC
+                  if (plannerViceCaptainId === elementId) setPlannerViceCaptainId(null);
+                  setSimulationResult(null);
+                }}
+                onViceCaptainClick={(elementId) => {
+                  setPlannerViceCaptainId(elementId);
+                  // If this player was Captain, clear Captain
+                  if (plannerCaptainId === elementId) setPlannerCaptainId(null);
+                  setSimulationResult(null);
                 }}
                 onTransferOut={() => setPlannerSwapMode("transfer")}
                 onBenchSwap={() => setPlannerSwapMode("benchswap")}
@@ -1736,9 +1747,11 @@ function PlannerPitch({
   elements,
   teams,
   captainId,
+  viceCaptainId,
   selectedSlot,
   onPlayerClick,
   onCaptainClick,
+  onViceCaptainClick,
   onTransferOut,
   onBenchSwap,
   onCancel,
@@ -1754,9 +1767,11 @@ function PlannerPitch({
   elements: BootstrapElement[];
   teams: BootstrapTeam[];
   captainId: number | null;
+  viceCaptainId: number | null;
   selectedSlot: number | null;
   onPlayerClick: (elementId: number) => void;
   onCaptainClick: (elementId: number) => void;
+  onViceCaptainClick: (elementId: number) => void;
   onTransferOut: () => void;
   onBenchSwap: () => void;
   onCancel: () => void;
@@ -1794,6 +1809,7 @@ function PlannerPitch({
     const xPts = proj?.expected_points ?? 0;
     const risk = proj?.risk_rating ?? "medium";
     const isCaptainPick = captainId === pick.element;
+    const isViceCaptainPick = viceCaptainId === pick.element;
     const isSelected = selectedSlot === pick.element;
     const eo = el ? parseFloat(el.selected_by_percent || "0") : 0;
 
@@ -1850,28 +1866,54 @@ function PlannerPitch({
         {/* Popover — Transfer Out / Swap / Cancel (ABOVE for most, BELOW for forwards) */}
         {showPopover && !popoverBelow && (
           <div
-            className="absolute -top-[72px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 rounded-xl bg-slate-900/95 backdrop-blur border border-purple-500/50 shadow-xl shadow-purple-900/30"
+            className="absolute -top-[82px] left-1/2 -translate-x-1/2 z-40 flex flex-col gap-1 p-1.5 rounded-xl bg-slate-900/95 backdrop-blur border border-purple-500/50 shadow-xl shadow-purple-900/30"
             onClick={(e) => e.stopPropagation()}
-            style={{ minWidth: 200 }}
+            style={{ minWidth: 220 }}
           >
-            <button
-              onClick={onTransferOut}
-              className="flex-1 px-2.5 py-2 rounded-lg bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-500 transition-colors whitespace-nowrap"
-            >
-              Transfer Out
-            </button>
-            <button
-              onClick={onBenchSwap}
-              className="flex-1 px-2.5 py-2 rounded-lg bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-500 transition-colors whitespace-nowrap"
-            >
-              Swap
-            </button>
-            <button
-              onClick={onCancel}
-              className="px-2 py-2 rounded-lg bg-slate-700 text-slate-300 text-[11px] hover:bg-slate-600 transition-colors"
-            >
-              &times;
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={onTransferOut}
+                className="flex-1 px-2.5 py-2 rounded-lg bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-500 transition-colors whitespace-nowrap"
+              >
+                Transfer Out
+              </button>
+              <button
+                onClick={onBenchSwap}
+                className="flex-1 px-2.5 py-2 rounded-lg bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-500 transition-colors whitespace-nowrap"
+              >
+                Swap
+              </button>
+              <button
+                onClick={onCancel}
+                className="px-2 py-2 rounded-lg bg-slate-700 text-slate-300 text-[11px] hover:bg-slate-600 transition-colors"
+              >
+                &times;
+              </button>
+            </div>
+            {!isBench && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => { onCaptainClick(pick.element); onCancel(); }}
+                  className={`flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                    isCaptainPick
+                      ? "bg-yellow-500 text-black"
+                      : "bg-yellow-600/30 text-yellow-400 hover:bg-yellow-600/50"
+                  }`}
+                >
+                  {isCaptainPick ? "Captain" : "Set Captain"}
+                </button>
+                <button
+                  onClick={() => { onViceCaptainClick(pick.element); onCancel(); }}
+                  className={`flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                    isViceCaptainPick
+                      ? "bg-blue-500 text-white"
+                      : "bg-blue-600/30 text-blue-400 hover:bg-blue-600/50"
+                  }`}
+                >
+                  {isViceCaptainPick ? "Vice Capt" : "Set VC"}
+                </button>
+              </div>
+            )}
             {/* Arrow pointing down */}
             <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-slate-900/95 border-b border-r border-purple-500/50" />
           </div>
@@ -1882,7 +1924,9 @@ function PlannerPitch({
             ? "border-purple-400 ring-2 ring-purple-400/40 bg-purple-900/30"
             : isCaptainPick
               ? "border-yellow-500 ring-1 ring-yellow-500/30 bg-yellow-900/20"
-              : "border-slate-600 bg-slate-800/60"
+              : isViceCaptainPick
+                ? "border-blue-500 ring-1 ring-blue-500/30 bg-blue-900/20"
+                : "border-slate-600 bg-slate-800/60"
         }`}>
           <div className={`text-lg font-bold text-center ${xPtsColor}`}>
             {xPts.toFixed(1)}
@@ -1898,6 +1942,12 @@ function PlannerPitch({
               C
             </div>
           )}
+          {/* Vice Captain badge */}
+          {isViceCaptainPick && (
+            <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-[10px] font-bold text-white">
+              V
+            </div>
+          )}
         </div>
         {/* Player name */}
         <div className="text-xs font-semibold text-white mt-1 text-center truncate w-full" title={pick.webName}>
@@ -1909,47 +1959,86 @@ function PlannerPitch({
           <span>|</span>
           <span title="Effective Ownership">{eo.toFixed(1)}%</span>
         </div>
-        {/* Captain toggle (double-click area) */}
+        {/* Captain / VC toggle */}
         {!isBench && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onCaptainClick(pick.element); }}
-            className={`mt-0.5 text-[8px] px-1.5 py-0.5 rounded transition-colors ${
-              isCaptainPick
-                ? "bg-yellow-500/20 text-yellow-400 font-semibold"
-                : "text-slate-600 hover:text-yellow-400 hover:bg-yellow-500/10"
-            }`}
-            title="Set as captain"
-          >
-            {isCaptainPick ? "CAPT" : "set C"}
-          </button>
+          <div className="flex gap-0.5 mt-0.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); onCaptainClick(pick.element); }}
+              className={`text-[8px] px-1.5 py-0.5 rounded transition-colors ${
+                isCaptainPick
+                  ? "bg-yellow-500/20 text-yellow-400 font-semibold"
+                  : "text-slate-600 hover:text-yellow-400 hover:bg-yellow-500/10"
+              }`}
+              title="Set as captain"
+            >
+              {isCaptainPick ? "C" : "C"}
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onViceCaptainClick(pick.element); }}
+              className={`text-[8px] px-1.5 py-0.5 rounded transition-colors ${
+                isViceCaptainPick
+                  ? "bg-blue-500/20 text-blue-400 font-semibold"
+                  : "text-slate-600 hover:text-blue-400 hover:bg-blue-500/10"
+              }`}
+              title="Set as vice captain"
+            >
+              V
+            </button>
+          </div>
         )}
         {/* Popover BELOW card — for forwards (top row) to avoid clipping */}
         {showPopover && popoverBelow && (
           <div
-            className="absolute -bottom-[52px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 p-1.5 rounded-xl bg-slate-900/95 backdrop-blur border border-purple-500/50 shadow-xl shadow-purple-900/30"
+            className="absolute -bottom-[82px] left-1/2 -translate-x-1/2 z-40 flex flex-col gap-1 p-1.5 rounded-xl bg-slate-900/95 backdrop-blur border border-purple-500/50 shadow-xl shadow-purple-900/30"
             onClick={(e) => e.stopPropagation()}
-            style={{ minWidth: 200 }}
+            style={{ minWidth: 220 }}
           >
             {/* Arrow pointing up */}
             <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-slate-900/95 border-t border-l border-purple-500/50" />
-            <button
-              onClick={onTransferOut}
-              className="flex-1 px-2.5 py-2 rounded-lg bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-500 transition-colors whitespace-nowrap"
-            >
-              Transfer Out
-            </button>
-            <button
-              onClick={onBenchSwap}
-              className="flex-1 px-2.5 py-2 rounded-lg bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-500 transition-colors whitespace-nowrap"
-            >
-              Swap
-            </button>
-            <button
-              onClick={onCancel}
-              className="px-2 py-2 rounded-lg bg-slate-700 text-slate-300 text-[11px] hover:bg-slate-600 transition-colors"
-            >
-              &times;
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={onTransferOut}
+                className="flex-1 px-2.5 py-2 rounded-lg bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-500 transition-colors whitespace-nowrap"
+              >
+                Transfer Out
+              </button>
+              <button
+                onClick={onBenchSwap}
+                className="flex-1 px-2.5 py-2 rounded-lg bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-500 transition-colors whitespace-nowrap"
+              >
+                Swap
+              </button>
+              <button
+                onClick={onCancel}
+                className="px-2 py-2 rounded-lg bg-slate-700 text-slate-300 text-[11px] hover:bg-slate-600 transition-colors"
+              >
+                &times;
+              </button>
+            </div>
+            {!isBench && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => { onCaptainClick(pick.element); onCancel(); }}
+                  className={`flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                    isCaptainPick
+                      ? "bg-yellow-500 text-black"
+                      : "bg-yellow-600/30 text-yellow-400 hover:bg-yellow-600/50"
+                  }`}
+                >
+                  {isCaptainPick ? "Captain" : "Set Captain"}
+                </button>
+                <button
+                  onClick={() => { onViceCaptainClick(pick.element); onCancel(); }}
+                  className={`flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                    isViceCaptainPick
+                      ? "bg-blue-500 text-white"
+                      : "bg-blue-600/30 text-blue-400 hover:bg-blue-600/50"
+                  }`}
+                >
+                  {isViceCaptainPick ? "Vice Capt" : "Set VC"}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
